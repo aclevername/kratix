@@ -1,0 +1,62 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: kratix-pipeline
+spec:
+  params:
+    - name: resourceKind
+      type: string
+    - name: resourceName
+      type: string
+    - name: resourceNamespace
+      type: string
+    - name: promiseIdentifier
+      type: string
+    - name: pipelineImage
+      type: string
+  steps:
+    - name: get-object
+      image: bitnami/kubectl:1.20.10
+      script: |
+        #!/bin/sh
+        touch /output/test
+        kubectl get $(params.resourceKind) $(params.resourceName) --namespace $(params.resourceNamespace) -oyaml > /input/object.yaml
+    - name: run-pipeline
+      image: $(params.pipelineImage)
+    - name: organise-files
+      image: bitnami/kubectl:1.20.10
+      script: |
+        #!/bin/sh
+        mkdir -p /work-creator-files/input
+        cp /output/* /work-creator-files/input/ || true # sometimes no files exists
+
+        mkdir -p /work-creator-files/metadata
+        cp /metadata/* /work-creator-files/metadata/ || true # sometimes no files exists
+
+        mkdir -p /work-creator-files/kratix-system
+        cp /configmap/selectors /work-creator-files/kratix-system/promise-cluster-selectors
+
+        echo "done"
+        exit 0
+      volumeMounts:
+      - name: configmap
+        mountPath: /configmap
+    - name: create-work
+      image: syntasso/kratix-platform-work-creator:main
+      script: |
+        #!/bin/sh
+        ./work-creator -identifier $(params.promiseIdentifier)-$(params.resourceNamespace)-$(params.resourceName) -input-directory /work-creator-files
+  volumes:
+    - name: configmap
+      configMap:
+        name: "cluster-selectors-$(params.promiseIdentifier)"
+  workspaces:
+    - name: metadata
+      mountPath: /metadata
+    - name: input
+      mountPath: /input
+    - name: output
+      mountPath: /output
+    - name: work-creator-files
+      mountPath: /work-creator-files

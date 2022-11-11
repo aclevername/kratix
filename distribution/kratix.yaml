@@ -336,15 +336,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - pods
-  verbs:
-  - create
-  - delete
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - serviceaccounts
   verbs:
   - create
@@ -484,6 +475,18 @@ rules:
   - escalate
   - get
   - list
+- apiGroups:
+  - tekton.dev
+  resources:
+  - taskruns
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

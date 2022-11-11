@@ -29,6 +29,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+
+	tekton "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,7 +63,7 @@ type dynamicResourceRequestController struct {
 	finalizers             []string
 }
 
-//+kubebuilder:rbac:groups="",resources=pods,verbs=create;list;watch;delete
+//+kubebuilder:rbac:groups=tekton.dev,resources=taskruns,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create
 
 func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -95,11 +97,7 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 		return ctrl.Result{}, nil
 	}
 
-	workCreatorCommand := fmt.Sprintf("./work-creator -identifier %s -input-directory /work-creator-files", resourceRequestIdentifier)
-
-	resourceRequestCommand := fmt.Sprintf("kubectl get %s.%s %s --namespace %s -oyaml > /output/object.yaml", strings.ToLower(r.gvk.Kind), r.gvk.Group, req.Name, req.Namespace)
-
-	pod := v1.Pod{
+	taskRun := tekton.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "request-pipeline-" + r.promiseIdentifier + "-" + getShortUuid(),
 			Namespace: "default",
@@ -108,107 +106,103 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 				"kratix-promise-resource-request-id": resourceRequestIdentifier,
 			},
 		},
-		Spec: v1.PodSpec{
-			RestartPolicy:      v1.RestartPolicyOnFailure,
+		Spec: tekton.TaskRunSpec{
 			ServiceAccountName: r.promiseIdentifier + "-sa",
-			Containers: []v1.Container{
+			Params: []tekton.Param{
 				{
-					Name: "writer",
-					//Image:   "syntasso/kratix-platform-work-creator:dev",
-					Image:   os.Getenv("WC_IMG"),
-					Command: []string{"sh", "-c", workCreatorCommand},
-					VolumeMounts: []v1.VolumeMount{
-						{
-							MountPath: "/work-creator-files/input",
-							Name:      "output",
-						},
-						{
-							MountPath: "/work-creator-files/metadata",
-							Name:      "metadata",
-						},
-						{
-							MountPath: "/work-creator-files/kratix-system",
-							Name:      "promise-cluster-selectors",
-						},
+					Name: "resourceKind",
+					Value: tekton.ParamValue{
+						StringVal: strings.ToLower(r.gvk.Kind) + "." + r.gvk.Group,
+						Type:      tekton.ParamTypeString,
+					},
+				},
+				{
+					Name: "resourceName",
+					Value: tekton.ParamValue{
+						StringVal: req.Name,
+						Type:      tekton.ParamTypeString,
+					},
+				},
+				{
+					Name: "resourceNamespace",
+					Value: tekton.ParamValue{
+						StringVal: req.Namespace,
+						Type:      tekton.ParamTypeString,
+					},
+				},
+				{
+					Name: "promiseIdentifier",
+					Value: tekton.ParamValue{
+						StringVal: r.promiseIdentifier,
+						Type:      tekton.ParamTypeString,
+					},
+				},
+				{
+					Name: "pipelineImage",
+					Value: tekton.ParamValue{
+						StringVal: r.xaasRequestPipeline[0],
+						Type:      tekton.ParamTypeString,
 					},
 				},
 			},
-			InitContainers: []v1.Container{
-				{
-					Name:    "reader",
-					Image:   "bitnami/kubectl:1.20.10",
-					Command: []string{"sh", "-c", resourceRequestCommand},
-					VolumeMounts: []v1.VolumeMount{
-						{
-							MountPath: "/output",
-							Name:      "input",
-						},
-					},
-				},
-				{
-					Name:  "xaas-request-pipeline-stage-1",
-					Image: r.xaasRequestPipeline[0],
-					//Command: Supplied by the image author via ENTRYPOINT/CMD
-					VolumeMounts: []v1.VolumeMount{
-						{
-							MountPath: "/input",
-							Name:      "input",
-						},
-						{
-							MountPath: "/output",
-							Name:      "output",
-						},
-						{
-							MountPath: "/metadata",
-							Name:      "metadata",
-						},
-					},
-				},
+			TaskRef: &tekton.TaskRef{
+				Name: "kratix-pipeline",
 			},
-			Volumes: []v1.Volume{
+			Workspaces: []tekton.WorkspaceBinding{
 				{
-					Name: "input",
-					VolumeSource: v1.VolumeSource{
-						EmptyDir: &v1.EmptyDirVolumeSource{},
-					},
+					Name:     "metadata",
+					EmptyDir: &v1.EmptyDirVolumeSource{},
 				},
 				{
-					Name: "output",
-					VolumeSource: v1.VolumeSource{
-						EmptyDir: &v1.EmptyDirVolumeSource{},
-					},
+					Name:     "input",
+					EmptyDir: &v1.EmptyDirVolumeSource{},
 				},
 				{
-					Name: "metadata",
-					VolumeSource: v1.VolumeSource{
-						EmptyDir: &v1.EmptyDirVolumeSource{},
-					},
+					Name:     "output",
+					EmptyDir: &v1.EmptyDirVolumeSource{},
 				},
 				{
-					Name: "promise-cluster-selectors",
-					VolumeSource: v1.VolumeSource{
-						ConfigMap: &v1.ConfigMapVolumeSource{
-							LocalObjectReference: v1.LocalObjectReference{
-								Name: "cluster-selectors-" + r.promiseIdentifier,
-							},
-							Items: []v1.KeyToPath{
-								{
-									Key:  "selectors",
-									Path: "promise-cluster-selectors",
-								},
-							},
-						},
-					},
+					Name:     "work-creator-files",
+					EmptyDir: &v1.EmptyDirVolumeSource{},
 				},
 			},
 		},
 	}
+	// ---
+	// apiVersion: tekton.dev/v1beta1
+	// kind: TaskRun
+	// metadata:
+	//   name: run-request-pipeline
+	// spec:
+	//   serviceAccountName: jenkins-promise-default-sa
+	//   params:
+	//     Name: resourceKind
+	//       Value: "jenkins.example.promise.syntasso.io"
+	//     Name: resourceName
+	//       value: "example"
+	//     - name: resourceNamespace
+	//       value: "default"
+	//     - name: promiseIdentifier
+	//       value: "jenkins-promise-default"
+	//     - name: pipelineImage
+	//       value: "syntasso/jenkins-request-pipeline"
+	//   taskRef:
+	//     name: kratix-pipeline
+	//   workspaces:
+	//     - name: metadata
+	//       emptyDir: {}
+	//     - name: input
+	//       emptyDir: {}
+	//     - name: output
+	//       emptydir: {}
+	//     - name: work-creator-files
+	//       emptydir: {}
 
 	logger.Info("Creating Pipeline for Promise resource request: " + resourceRequestIdentifier + ". The pipeline will now execute...")
-	err = r.client.Create(ctx, &pod)
+	err = r.client.Create(ctx, &taskRun)
 	if err != nil {
-		logger.Error(err, "Error creating Pod")
-		y, _ := yaml.Marshal(&pod)
+		logger.Error(err, "Error creating task")
+		y, _ := yaml.Marshal(&taskRun)
 		logger.Error(err, string(y))
 	}
 
@@ -225,7 +219,7 @@ func (r *dynamicResourceRequestController) pipelineHasExecuted(resourceRequestId
 		LabelSelector: selector,
 	}
 
-	ol := &v1.PodList{}
+	ol := &tekton.TaskRunList{}
 	err := r.client.List(context.Background(), ol, listOps)
 	if err != nil {
 		fmt.Println(err.Error())

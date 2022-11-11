@@ -25,6 +25,7 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	tekton "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,6 +41,7 @@ var setupLog = ctrl.Log.WithName("setup")
 
 func init() {
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(tekton.AddToScheme(scheme.Scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

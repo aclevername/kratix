@@ -375,6 +375,7 @@ func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1alpha1
 		return defaultRequeue, r.Client.Delete(ctx, promiseDep)
 
 	}
+
 	if finalizersAreDeleted(promise, promiseFinalizers) {
 		return ctrl.Result{}, nil
 	}

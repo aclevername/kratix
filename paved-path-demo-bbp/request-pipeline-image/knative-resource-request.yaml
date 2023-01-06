@@ -1,0 +1,6 @@
+---
+apiVersion: example.promise.syntasso.io/v1
+kind: knativeserving
+metadata:
+  name: knative-serving
+  namespace: default

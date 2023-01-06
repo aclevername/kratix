@@ -21,7 +21,7 @@ func deleteAllResourcesWithKindMatchingLabel(ctx context.Context, kClient client
 	listOptions := client.ListOptions{LabelSelector: labels.SelectorFromSet(resourceLabels)}
 	err := kClient.List(ctx, resourceList, &listOptions)
 	if err != nil {
-		return true, err
+		return false, nil
 	}
 
 	logger.Info("deleting resources", "kind", resourceList.GetKind(), "withLabels", resourceLabels, "resources", getResourceNames(resourceList.Items))

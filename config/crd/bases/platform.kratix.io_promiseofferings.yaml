@@ -33,15 +33,17 @@ spec:
           metadata:
             type: object
           spec:
-            description: PromiseOfferingSpec defines the desired state of PromiseOffering
-            properties:
-              name:
-                type: string
-              url:
-                type: string
-              version:
-                type: string
-            type: object
+            items:
+              description: PromiseOfferingSpec defines the desired state of PromiseOffering
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                version:
+                  type: string
+              type: object
+            type: array
           status:
             description: PromiseOfferingStatus defines the observed state of PromiseOffering
             type: object

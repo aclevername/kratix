@@ -1,0 +1,7 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseOffering
+metadata:
+  name: postgresql
+spec:
+  - url: https://raw.githubusercontent.com/syntasso/kratix-marketplace/main/postgresql/promise.yaml
+    version: v1alpha1

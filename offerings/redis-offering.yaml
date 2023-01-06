@@ -1,0 +1,7 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseOffering
+metadata:
+  name: redis
+spec:
+  - url: https://raw.githubusercontent.com/syntasso/kratix-marketplace/main/redis/promise.yaml
+    version: v1alpha1

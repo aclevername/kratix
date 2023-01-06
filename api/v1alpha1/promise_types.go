@@ -50,7 +50,14 @@ type PromiseSpec struct {
 
 	WorkerClusterResources []WorkerClusterResource `json:"workerClusterResources,omitempty"`
 
+	Dependencies []Dependency `json:"dependencies,omitempty"`
+
 	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
+}
+
+type Dependency struct {
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 // Resources represents the manifest workload to be deployed on worker cluster
@@ -66,9 +73,12 @@ type WorkerClusterResource struct {
 type PromiseStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	MissingDependencies string `json:"missingDependencies,omitempty"`
 }
 
 //+kubebuilder:object:root=true
+//+kubebuilder:printcolumn:name="Missing Dependencies",type="string",JSONPath=".status.missingDependencies",description="missing dependencies"
 //+kubebuilder:subresource:status
 
 // Promise is the Schema for the promises API

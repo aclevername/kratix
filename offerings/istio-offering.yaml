@@ -1,0 +1,7 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseOffering
+metadata:
+  name: istio
+spec:
+  - url: https://raw.githubusercontent.com/syntasso/kratix-marketplace/main/istio/promise.yaml
+    version: v1alpha1

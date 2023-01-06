@@ -19,12 +19,21 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	controllerutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -34,6 +43,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -83,6 +94,8 @@ var (
 
 //+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch;delete
 
+//+kubebuilder:rbac:groups=platform.kratix.io,resources=promiseofferings,verbs=get;list;watch;create;update;patch;delete
+
 func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	promise := &v1alpha1.Promise{}
 	err := r.Client.Get(ctx, req.NamespacedName, promise)
@@ -103,6 +116,20 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	finalizers := getDesiredFinalizers(promise)
 	if finalizersAreMissing(promise, finalizers) {
 		return addFinalizers(ctx, r.Client, promise, finalizers, logger)
+	}
+
+	if len(promise.Spec.Dependencies) != 0 {
+		requeue, err := r.reconcileDependencies(ctx, promise, logger)
+		if err != nil {
+			logger.Error(err, "failed to reconcile dependencies")
+			return ctrl.Result{}, nil
+		}
+
+		if requeue {
+			return fastRequeue, nil
+		}
+
+		logger.Info("finished reconciling dependencies")
 	}
 
 	if err := r.createWorkResourceForWorkerClusterResources(ctx, promise, logger); err != nil {
@@ -335,6 +362,19 @@ func (r *PromiseReconciler) ensureCRDExists(ctx context.Context, rrCRD *apiexten
 }
 
 func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) (ctrl.Result, error) {
+	for _, dep := range promise.Spec.Dependencies {
+		promiseDep := &v1alpha1.Promise{}
+		err := r.Client.Get(ctx, client.ObjectKey{Namespace: "default", Name: dep.Name}, promiseDep)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				continue
+			}
+			r.Log.Error(err, "Failed getting Promise", "name", dep.Name)
+			return defaultRequeue, nil
+		}
+		return defaultRequeue, r.Client.Delete(ctx, promiseDep)
+
+	}
 	if finalizersAreDeleted(promise, promiseFinalizers) {
 		return ctrl.Result{}, nil
 	}
@@ -520,7 +560,36 @@ func (r *PromiseReconciler) deleteWork(ctx context.Context, promise *v1alpha1.Pr
 func (r *PromiseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Promise{}).
+		Watches(
+			&source.Kind{Type: &platformv1alpha1.PromiseOffering{}},
+			handler.EnqueueRequestsFromMapFunc(r.requeueAllPromises),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
 		Complete(r)
+}
+
+func (r *PromiseReconciler) requeueAllPromises(promiseOffering client.Object) []reconcile.Request {
+	logger := r.Log.WithValues("promiseOffering", promiseOffering.GetName())
+
+	promises := &platformv1alpha1.PromiseList{}
+	err := r.Client.List(context.TODO(), promises)
+	if err != nil {
+		logger.Error(err, "failed to list promises")
+		return []reconcile.Request{}
+	}
+
+	requests := []reconcile.Request{}
+	for _, promise := range promises.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      promise.GetName(),
+				Namespace: promise.GetNamespace(),
+			},
+		})
+	}
+
+	logger.Info("triggering promise reconciliations for new PromiseOffering", "promises", requests)
+	return requests
 }
 
 func generateCRDAndGVK(promise *v1alpha1.Promise, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, schema.GroupVersionKind, error) {
@@ -565,4 +634,100 @@ func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx cont
 	}
 
 	return nil
+}
+
+func (r *PromiseReconciler) reconcileDependencies(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) (bool, error) {
+	promises := &platformv1alpha1.PromiseList{}
+	err := r.Client.List(context.TODO(), promises)
+	if err != nil {
+		logger.Error(err, "failed to list promises")
+		return false, err
+	}
+
+	offerings := &platformv1alpha1.PromiseOfferingList{}
+	err = r.Client.List(context.TODO(), offerings)
+	if err != nil {
+		logger.Error(err, "failed to list offerings")
+		return false, err
+	}
+
+	var missingDependencies []platformv1alpha1.Dependency
+	defer func() {
+		var missingDepString []string
+		for _, dep := range missingDependencies {
+			missingDepString = append(missingDepString, dep.Name)
+		}
+		promise.Status.MissingDependencies = strings.Join(missingDepString, ",")
+		r.Client.Status().Update(ctx, promise)
+	}()
+
+	logger.Info("checking dependencies are fulfilled", "dependencies", promise.Spec.Dependencies)
+	for _, dependency := range promise.Spec.Dependencies {
+		logger.Info("checking dependency", "dependency", dependency)
+		if dependencyIsNotInstalled(promises, dependency) {
+			missingDependencies = append(missingDependencies, dependency)
+		}
+	}
+
+	for _, dependency := range missingDependencies {
+		depLogger := r.Log.WithValues("dependency", dependency)
+		depLogger.Info("dep is not installed, checking if offering is available")
+		offering, url := getMatchingOffering(offerings, dependency)
+		if offering == nil {
+			depLogger.Info("no promise offering available")
+			return false, fmt.Errorf("no promise available for dependency %s", dependency.Name)
+		}
+
+		depLogger.Info("matching offering found, installing", "offering", offering.Name, "url", url)
+		resp, err := http.Get(url)
+		if err != nil {
+			return false, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return false, fmt.Errorf("bad status: %s", resp.Status)
+		}
+
+		decoder := yaml.NewYAMLOrJSONDecoder(resp.Body, 2048)
+		us := unstructured.Unstructured{}
+
+		err = decoder.Decode(&us)
+		depLogger.Info("decoding promise")
+		if err != nil {
+			return false, err
+		}
+		depLogger.Info("creating promise")
+		err = r.Client.Create(ctx, &us)
+		if err != nil {
+			return false, err
+		}
+
+		depLogger.Info("promise created, requeuing")
+		return true, nil
+	}
+	return false, nil
+}
+
+func getMatchingOffering(offerings *platformv1alpha1.PromiseOfferingList, dep platformv1alpha1.Dependency) (*platformv1alpha1.PromiseOffering, string) {
+	for _, offering := range offerings.Items {
+		if offering.Name == dep.Name {
+			for _, v := range offering.Spec {
+				if v.Version == dep.Version {
+					return &offering, v.URL
+				}
+			}
+			return nil, ""
+		}
+	}
+	return nil, ""
+}
+
+func dependencyIsNotInstalled(promises *platformv1alpha1.PromiseList, dep platformv1alpha1.Dependency) bool {
+	for _, promise := range promises.Items {
+		if promise.Name == dep.Name {
+			return false
+		}
+	}
+
+	return true
 }

@@ -74,6 +74,18 @@ rules:
 - apiGroups:
   - platform.kratix.io
   resources:
+  - promiseofferings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.kratix.io
+  resources:
   - promises
   verbs:
   - create

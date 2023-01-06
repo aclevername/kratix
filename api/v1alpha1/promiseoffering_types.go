@@ -25,7 +25,6 @@ import (
 
 // PromiseOfferingSpec defines the desired state of PromiseOffering
 type PromiseOfferingSpec struct {
-	Name    string `json:"name,omitempty"`
 	Version string `json:"version,omitempty"`
 	URL     string `json:"url,omitempty"`
 }

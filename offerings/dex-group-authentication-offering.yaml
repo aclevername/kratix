@@ -1,0 +1,7 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseOffering
+metadata:
+  name: dex-group-authentication
+spec:
+  - url: https://raw.githubusercontent.com/syntasso/kratix-marketplace/main/dex-group-authentication/promise.yaml
+    version: v1alpha1

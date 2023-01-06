@@ -1,0 +1,7 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseOffering
+metadata:
+  name: crossplane
+spec:
+  - url: https://raw.githubusercontent.com/syntasso/kratix-marketplace/main/crossplane/promise.yaml
+    version: v1alpha1

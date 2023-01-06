@@ -36,8 +36,6 @@ spec:
             items:
               description: PromiseOfferingSpec defines the desired state of PromiseOffering
               properties:
-                name:
-                  type: string
                 url:
                   type: string
                 version:

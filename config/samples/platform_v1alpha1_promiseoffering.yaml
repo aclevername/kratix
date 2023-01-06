@@ -1,0 +1,12 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseOffering
+metadata:
+  labels:
+    app.kubernetes.io/name: promiseoffering
+    app.kubernetes.io/instance: promiseoffering-sample
+    app.kubernetes.io/part-of: kratix
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kratix
+  name: promiseoffering-sample
+spec:
+  # TODO(user): Add fields here

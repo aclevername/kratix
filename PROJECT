@@ -40,4 +40,12 @@ resources:
   kind: WorkPlacement
   path: github.com/syntasso/kratix/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: kratix.io
+  group: platform
+  kind: PromiseOffering
+  path: github.com/syntasso/kratix/api/v1alpha1
+  version: v1alpha1
 version: "3"

@@ -690,15 +690,21 @@ func (r *PromiseReconciler) reconcileDependencies(ctx context.Context, promise *
 		}
 
 		decoder := yaml.NewYAMLOrJSONDecoder(resp.Body, 2048)
-		us := unstructured.Unstructured{}
+		depPromise := platformv1alpha1.Promise{}
 
-		err = decoder.Decode(&us)
+		err = decoder.Decode(&depPromise)
 		depLogger.Info("decoding promise")
 		if err != nil {
 			return false, err
 		}
+
+		if dependency.ClusterSelectorOverride != nil {
+			depLogger.Info("overriding clusterSelectors", "clusterSelector", dependency.ClusterSelectorOverride)
+			depPromise.Spec.ClusterSelector = dependency.ClusterSelectorOverride
+		}
+
 		depLogger.Info("creating promise")
-		err = r.Client.Create(ctx, &us)
+		err = r.Client.Create(ctx, &depPromise)
 		if err != nil {
 			return false, err
 		}

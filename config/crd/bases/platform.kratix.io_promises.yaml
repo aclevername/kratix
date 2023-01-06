@@ -47,6 +47,10 @@ spec:
               dependencies:
                 items:
                   properties:
+                    clusterSelectorOverride:
+                      additionalProperties:
+                        type: string
+                      type: object
                     name:
                       type: string
                     version:

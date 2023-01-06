@@ -56,8 +56,9 @@ type PromiseSpec struct {
 }
 
 type Dependency struct {
-	Name    string `json:"name,omitempty"`
-	Version string `json:"version,omitempty"`
+	Name                    string            `json:"name,omitempty"`
+	Version                 string            `json:"version,omitempty"`
+	ClusterSelectorOverride map[string]string `json:"clusterSelectorOverride,omitempty"`
 }
 
 // Resources represents the manifest workload to be deployed on worker cluster

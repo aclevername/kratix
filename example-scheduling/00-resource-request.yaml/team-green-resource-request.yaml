@@ -1,0 +1,7 @@
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: namespace
+metadata:
+  name: team-blue
+  namespace: default
+spec:
+  namespaceName: team-blue

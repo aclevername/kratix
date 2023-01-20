@@ -59,6 +59,7 @@ func (r *Scheduler) createWorkplacementsForTargetClusters(work *platformv1alpha1
 		workPlacement.Name = work.Name + "." + targetClusterName
 		workPlacement.Spec.WorkName = work.Name
 		workPlacement.Spec.TargetClusterName = targetClusterName
+		workPlacement.Labels = work.Labels
 		controllerutil.AddFinalizer(&workPlacement, repoCleanupWorkPlacementFinalizer)
 
 		if err := controllerutil.SetControllerReference(work, &workPlacement, scheme.Scheme); err != nil {
@@ -81,6 +82,30 @@ func (r *Scheduler) createWorkplacementsForTargetClusters(work *platformv1alpha1
 // Where Work is a Resource Request return one random Cluster name, where Work is a
 // ClusterWorkerResource return all Cluster names
 func (r *Scheduler) getTargetClusterNames(work *platformv1alpha1.Work) []string {
+	if work.IsResourceRequest() {
+		if len(work.Spec.WorkAffinity) > 0 {
+			r.Log.Info("Checking if related Works have been scheduled to a cluster already", "work", work.GetName())
+
+			if desiredCluster := r.checkIfClusterAlreadySelectedBySiblingWork(work); desiredCluster != "" {
+				r.Log.Info("Releated Work is already scheduled, co-locating Work to the same cluster", "cluster", desiredCluster, "work", work.GetName())
+				return []string{desiredCluster}
+			}
+		}
+	}
+	if work.Spec.ClusterSelector == nil {
+		work.Spec.ClusterSelector = map[string]string{}
+	}
+
+	if len(work.Spec.WorkAffinity) > 0 {
+		for _, siblingWorkLabel := range work.Spec.WorkAffinity {
+			siblingWork := r.GetWorkWithLabel(siblingWorkLabel)
+			if siblingWork == nil {
+				panic("checked in controller, shouldn't happen")
+			}
+			work.Spec.ClusterSelector = labels.Merge(work.Spec.ClusterSelector, siblingWork.Spec.ClusterSelector)
+		}
+	}
+
 	workerClusters := r.getWorkerClustersForWork(work)
 
 	if len(workerClusters) == 0 {
@@ -93,7 +118,7 @@ func (r *Scheduler) getTargetClusterNames(work *platformv1alpha1.Work) []string 
 		rand.Seed(time.Now().UnixNano())
 		randomClusterIndex := rand.Intn(len(workerClusters))
 		targetClusterNames[0] = workerClusters[randomClusterIndex].Name
-		r.Log.Info("Adding Worker Cluster: " + targetClusterNames[0])
+		r.Log.Info("Scheduling to cluster: " + targetClusterNames[0])
 		return targetClusterNames
 	} else if work.IsWorkerResource() {
 		r.Log.Info("Getting Worker cluster names for Worker Resources")
@@ -127,9 +152,77 @@ func (r *Scheduler) getWorkerClustersForWork(work *platformv1alpha1.Work) []plat
 		lo.LabelSelector = selector
 	}
 
+	r.Log.Info("listing clusters with selectors", "clusterSelectors", work.Spec.ClusterSelector)
 	err := r.Client.List(context.Background(), workerClusters, lo)
 	if err != nil {
 		r.Log.Error(err, "Error listing available clusters")
 	}
+
 	return workerClusters.Items
+}
+
+func (r *Scheduler) checkIfClusterAlreadySelectedBySiblingWork(work *platformv1alpha1.Work) string {
+	for _, workAffinity := range work.Spec.WorkAffinity {
+		if workPlacement := r.GetWorkPlacementWithLabel(workAffinity); workPlacement != nil {
+			return workPlacement.Spec.TargetClusterName
+		}
+	}
+
+	return ""
+}
+
+func (r *Scheduler) GetWorkWithLabel(label string) *platformv1alpha1.Work {
+	// r.Log.Info("getting work with label", "label", label)
+	works := &platformv1alpha1.WorkList{}
+	lo := &client.ListOptions{
+		Namespace: "default",
+	}
+
+	workSelectorLabel := labels.FormatLabels(map[string]string{label: ""})
+	selector, err := labels.Parse(workSelectorLabel)
+
+	if err != nil {
+		r.Log.Error(err, "error parsing cluster selector labels")
+	}
+	lo.LabelSelector = selector
+
+	err = r.Client.List(context.Background(), works, lo)
+	if err != nil {
+		r.Log.Error(err, "Error listing available clusters")
+	}
+	if len(works.Items) > 0 {
+		// r.Log.Info("work with label found", "label", label)
+		return &works.Items[0]
+	}
+
+	// r.Log.Info("work with label not found", "label", label)
+	return nil
+}
+
+func (r *Scheduler) GetWorkPlacementWithLabel(label string) *platformv1alpha1.WorkPlacement {
+	// r.Log.Info("getting workPlacement with label", "label", label)
+	workPlacements := &platformv1alpha1.WorkPlacementList{}
+	lo := &client.ListOptions{
+		Namespace: "default",
+	}
+
+	workSelectorLabel := labels.FormatLabels(map[string]string{label: ""})
+	selector, err := labels.Parse(workSelectorLabel)
+
+	if err != nil {
+		r.Log.Error(err, "error parsing cluster selector labels")
+	}
+	lo.LabelSelector = selector
+
+	err = r.Client.List(context.Background(), workPlacements, lo)
+	if err != nil {
+		r.Log.Error(err, "Error listing available clusters")
+	}
+	if len(workPlacements.Items) > 0 {
+		// r.Log.Info("workPlacement with label found", "label", label)
+		return &workPlacements.Items[0]
+	}
+
+	// r.Log.Info("workPlacement with label not found", "label", label)
+	return nil
 }

@@ -1,0 +1,10 @@
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: namespace
+metadata:
+  name: team-green
+  namespace: default
+  labels:
+    co-locate.kratix.io/namespace.marketplace.kratix.io.v1alpha1: "team-blue"
+    cluster-selector.kratix.io/security-compliant: "true"
+spec:
+  namespaceName: team-green

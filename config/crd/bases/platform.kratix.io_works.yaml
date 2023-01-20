@@ -45,6 +45,12 @@ spec:
                 description: -1 denotes Cluster Worker Resources, 1 denotes Resource
                   Request
                 type: integer
+              workAffinity:
+                description: WorkAffinity determine which Works should be colocated
+                  with this Work
+                items:
+                  type: string
+                type: array
               workload:
                 description: Workload represents the manifest workload to be deployed
                   on worker cluster

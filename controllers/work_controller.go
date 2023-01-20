@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
@@ -70,7 +72,6 @@ func (r *WorkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	workPlacementListOptions := &client.ListOptions{
 		Namespace: "default",
 	}
-	logger.Info("Listing Workplacements for Work")
 	err = r.Client.List(context.Background(), workPlacementList, workPlacementListOptions)
 	if err != nil {
 		logger.Error(err, "Error getting WorkPlacements")
@@ -82,12 +83,24 @@ func (r *WorkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		workPlacementNames = append(workPlacementNames, item.Name)
 	}
 
-	logger.Info("Found WorkPlacements for WorkName", "workPlacements", workPlacementNames)
 	for _, workPlacement := range workPlacementList.Items {
 		if workPlacement.Spec.WorkName == work.Name {
 			logger.Info("WorkPlacements for work exist", "workPlacement", workPlacement.Name)
 			return ctrl.Result{}, nil
 		}
+	}
+
+	if len(work.Spec.WorkAffinity) > 0 {
+		logger.Info("Checking if Work affinities exist")
+		for _, siblingWorkLabel := range work.Spec.WorkAffinity {
+			siblingWork := r.Scheduler.GetWorkWithLabel(siblingWorkLabel)
+			if siblingWork == nil {
+				logger.Info("Missing work affinities, waiting for them to exist before scheduling, requeuing", "siblingWorkName", siblingWorkLabel)
+				randomWaitTime := time.Duration(rand.Intn(3) + 1)
+				return ctrl.Result{RequeueAfter: (randomWaitTime * time.Second)}, nil
+			}
+		}
+		logger.Info("All Work affinities exist,")
 	}
 
 	// If Work does not have a WorkPlacement then schedule the Work

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	goerr "errors"
 
@@ -58,12 +59,55 @@ func (w *WorkCreator) Execute(rootDirectory string, identifier string) error {
 		}
 	}
 
+	fileName := filepath.Join(rootDirectory, "object", "object.yaml")
+	file, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+	resourceRequest := unstructured.Unstructured{}
+	err = yaml.NewYAMLOrJSONDecoder(file, 2048).Decode(&resourceRequest)
+	if err != nil {
+		return err
+	}
+
 	work := platformv1alpha1.Work{}
 	work.Name = identifier
 	work.Namespace = "default"
 	work.Spec.Replicas = platformv1alpha1.ResourceRequestReplicas
-
 	work.Spec.ClusterSelector, err = w.getMergedClusterSelector(rootDirectory)
+
+	if work.Labels == nil {
+		work.Labels = map[string]string{}
+	}
+
+	if work.Spec.ClusterSelector == nil {
+		work.Spec.ClusterSelector = map[string]string{}
+	}
+
+	work.Labels[resourceRequest.GetName()+"."+strings.ToLower(resourceRequest.GetKind())+"."+strings.ReplaceAll(strings.ToLower(resourceRequest.GetAPIVersion()), "/", ".")] = ""
+
+	kratixColocateLabel := "co-locate.kratix.io/"
+	kratixClusterSelectorLabel := "cluster-selector.kratix.io/"
+	for key, value := range resourceRequest.GetLabels() {
+		if strings.HasPrefix(key, kratixColocateLabel) {
+			//e.g. kratix.io/co-locate/jenkins.marketplace.io/v1
+			apiVersion := strings.TrimPrefix(key, kratixColocateLabel)
+			for _, rr := range strings.Split(value, ",") {
+				work.Spec.WorkAffinity = append(work.Spec.WorkAffinity, rr+"."+apiVersion)
+			}
+		}
+
+		if strings.HasPrefix(key, kratixClusterSelectorLabel) {
+			clusterSelectorKey := strings.TrimPrefix(key, kratixClusterSelectorLabel)
+			work.Spec.ClusterSelector[clusterSelectorKey] = value
+		}
+	}
+	// val, ok := resourceRequest.GetLabels()[kratixColocateLabel]
+	// if ok {
+	// 	for _, rr := range strings.Split(val, ",") {
+	// 		work.Spec.WorkAffinity[rr] = "resource-request"
+	// 	}
+	// }
 
 	if err != nil {
 		return err

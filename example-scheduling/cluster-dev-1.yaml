@@ -1,0 +1,10 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: Cluster
+metadata:
+  labels:
+    environment: dev
+  name: dev-1
+  namespace: default
+spec:
+  bucketPath: worker-cluster-1
+  id: worker-cluster-1-id

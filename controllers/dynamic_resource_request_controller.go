@@ -126,6 +126,10 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 					Command: []string{"sh", "-c", workCreatorCommand},
 					VolumeMounts: []v1.VolumeMount{
 						{
+							MountPath: "/work-creator-files/object",
+							Name:      "input",
+						},
+						{
 							MountPath: "/work-creator-files/input",
 							Name:      "output",
 						},

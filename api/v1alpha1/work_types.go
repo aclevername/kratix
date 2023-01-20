@@ -50,6 +50,9 @@ type WorkSpec struct {
 	// ClusterSelector is the selector to use for selecting the worker cluster
 	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
 
+	// WorkAffinity determine which Works should be colocated with this Work
+	WorkAffinity []string `json:"workAffinity,omitempty"`
+
 	// -1 denotes Cluster Worker Resources, 1 denotes Resource Request
 	Replicas int `json:"replicas,omitempty"`
 }

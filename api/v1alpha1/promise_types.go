@@ -48,7 +48,8 @@ type PromiseSpec struct {
 	// Array of Image tags to transform from input request custom resource to output resource(s)
 	XaasRequestPipeline []string `json:"xaasRequestPipeline,omitempty"`
 
-	WorkerClusterResources []WorkerClusterResource `json:"workerClusterResources,omitempty"`
+	WorkerClusterResources       []WorkerClusterResource `json:"workerClusterResources,omitempty"`
+	WorkerClusterResourcesImages []string                `json:"workerClusterResourcesImages,omitempty"`
 
 	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
 }

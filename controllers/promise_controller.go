@@ -17,13 +17,18 @@ limitations under the License.
 package controllers
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
+	"path/filepath"
 	"time"
 
 	controllerutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/go-logr/logr"
+	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/syntasso/kratix/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -34,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -555,6 +561,17 @@ func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx cont
 		workToCreate.Spec.Workload.Manifests = append(workToCreate.Spec.Workload.Manifests, v1alpha1.Manifest{Unstructured: u.Unstructured})
 	}
 
+	for _, image := range promise.Spec.WorkerClusterResourcesImages {
+		manifests, err := getManifestsFromImage(image, logger)
+		logger.Info("manifests", "size", len(manifests))
+		if err != nil {
+			return err
+		}
+		workToCreate.Spec.Workload.Manifests = append(workToCreate.Spec.Workload.Manifests, manifests...)
+	}
+
+	logger.Info("work", "manifests", workToCreate.Spec.Workload.Manifests)
+
 	logger.Info("Creating Work resource for promise")
 	err := r.Client.Create(ctx, workToCreate)
 	if err != nil {
@@ -566,4 +583,135 @@ func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx cont
 	}
 
 	return nil
+}
+
+func getManifestsFromImage(url string, logger logr.Logger) ([]v1alpha1.Manifest, error) {
+	logger.Info("pulling image", "image", url)
+	image, err := crane.Pull(url)
+	if err != nil {
+		panic(err)
+	}
+	manifest, err := image.Manifest()
+	if err != nil {
+		panic(err)
+	}
+	logger.Info("image manifest", "manifest", manifest)
+	layers, err := image.Layers()
+	if err != nil {
+		panic(err)
+	}
+	for _, layer := range layers {
+		reader, err := layer.Compressed()
+		if err != nil {
+			panic(err)
+		}
+		mediaType, err := layer.MediaType()
+		if err != nil {
+			panic(err)
+		}
+		logger.Info("layer mediatype", "mediatype", mediaType)
+		if mediaType == "application/vnd.docker.image.rootfs.diff.tar.gzip" || mediaType == "application/vnd.oci.image.layer.v1.tar" {
+			logger.Info("untarring", "mediatype", mediaType)
+			return Untar(reader, logger)
+		}
+	}
+	return nil, nil
+}
+
+// Untar takes a destination path and a reader; a tar reader loops over the tarfile
+// creating the file structure at 'dst' along the way, and writing any files
+func Untar(r io.Reader, logger logr.Logger) ([]v1alpha1.Manifest, error) {
+	dst := "/tmp/"
+	var manifests []v1alpha1.Manifest
+
+	gzr, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+
+		switch {
+
+		// if no more files are found return
+		case err == io.EOF:
+			return manifests, nil
+
+		// return any other error
+		case err != nil:
+			return nil, err
+
+		// if the header is nil, just skip it (not sure how this happens)
+		case header == nil:
+			continue
+		}
+
+		// the target location where the dir/file should be created
+		target := filepath.Join(dst, header.Name)
+
+		// the following switch could also be done using fi.Mode(), not sure if there
+		// a benefit of using one vs. the other.
+		// fi := header.FileInfo()
+
+		// check the file type
+		switch header.Typeflag {
+
+		// if its a dir and it doesn't exist create it
+		case tar.TypeDir:
+			// if _, err := os.Stat(target); err != nil {
+			// 	if err := os.MkdirAll(target, 0755); err != nil {
+			// 		return err
+			// 	}
+			// }
+			logger.Info("dir found", "dir", target)
+
+		// if it's a file create it
+		case tar.TypeReg:
+			// f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			// if err != nil {
+			// 	return err
+			// }
+
+			// // copy over contents
+			// if _, err := io.Copy(f, tr); err != nil {
+			// 	return err
+			// }
+
+			// // manually close here after each file operation; defering would cause each file close
+			// // to wait until all operations have completed.
+			// f.Close()
+			logger.Info("file found", "file", target)
+			decoder := yaml.NewYAMLOrJSONDecoder(tr, 2048)
+			for {
+				us := unstructured.Unstructured{}
+
+				err = decoder.Decode(&us)
+				if err != nil {
+					if err == io.EOF {
+						logger.Info("EOF", "file", target)
+						//We reached the end of the file, move on to looking for the resource
+						break
+					}
+					return manifests, err
+				}
+				if len(us.Object) == 0 {
+					logger.Info("empty", "file", target)
+					// Empty yaml documents (including only containing comments) should not be appended
+					continue
+				}
+				//append the first resource to the resource slice, and go back through the loop
+
+				logger.Info("found manifests", "file", target, "manifests", us)
+				if us.GetKind() != "Kustomization" {
+					manifests = append(manifests, v1alpha1.Manifest{
+						Unstructured: us,
+					})
+				}
+			}
+		}
+	}
 }

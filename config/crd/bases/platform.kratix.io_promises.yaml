@@ -46,6 +46,10 @@ spec:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
                 type: array
+              workerClusterResourcesImages:
+                items:
+                  type: string
+                type: array
               xaasCrd:
                 description: X's CustomResourceDefinition to create the X-aaS offering
                 type: object

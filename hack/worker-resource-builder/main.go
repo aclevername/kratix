@@ -56,6 +56,9 @@ func main() {
 			} else if err == io.EOF {
 				break
 			} else {
+				if us.GetKind() != "Promise" {
+					us.SetNamespace(os.Getenv("KNAMESPACE"))
+				}
 				resources = append(resources, platformv1alpha1.WorkerClusterResource{Unstructured: *us})
 			}
 		}

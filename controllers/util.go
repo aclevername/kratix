@@ -35,6 +35,8 @@ func DeleteAllResourcesWithKindMatchingLabel(ctx context.Context, kClient client
 		logger.Info("successfully triggered deletion of resource", "name", resource.GetName(), "kind", resource.GetKind())
 	}
 
+	logger.Info("resources remaining", "resources", resourceList)
+
 	return len(resourceList.Items) != 0, nil
 }
 

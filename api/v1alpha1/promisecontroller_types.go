@@ -29,7 +29,13 @@ type PromiseControllerSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Foo is an example field of PromiseController. Edit promisecontroller_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
+	Pipelines       []string          `json:"pipelines,omitempty"`
+	UID             string            `json:"uid,omitempty"`
+	Group           string            `json:"group,omitempty"`
+	Version         string            `json:"version,omitempty"`
+	Kind            string            `json:"kind,omitempty"`
+	Plural          string            `json:"plural,omitempty"`
 }
 
 // PromiseControllerStatus defines the observed state of PromiseController

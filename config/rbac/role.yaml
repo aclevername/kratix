@@ -83,6 +83,32 @@ rules:
 - apiGroups:
   - platform.kratix.io
   resources:
+  - promisecontrollers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.kratix.io
+  resources:
+  - promisecontrollers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - platform.kratix.io
+  resources:
+  - promisecontrollers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - platform.kratix.io
+  resources:
   - promises
   verbs:
   - create

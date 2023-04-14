@@ -84,8 +84,8 @@ func (r *WorkPlacementReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return r.deleteWorkPlacement(ctx, workPlacement, paths, logger)
 	}
 
-	if finalizersAreMissing(workPlacement, workPlacementFinalizers) {
-		return addFinalizers(ctx, r.Client, workPlacement, workPlacementFinalizers, logger)
+	if FinalizersAreMissing(workPlacement, workPlacementFinalizers) {
+		return AddFinalizers(ctx, r.Client, workPlacement, workPlacementFinalizers, logger)
 	}
 
 	work := r.getWork(workPlacement.Spec.WorkName, logger)

@@ -15,10 +15,10 @@ import (
 )
 
 // pass in nil resourceLabels to delete all resources of the GVK
-func deleteAllResourcesWithKindMatchingLabel(ctx context.Context, kClient client.Client, gvk schema.GroupVersionKind, resourceLabels map[string]string, logger logr.Logger) (bool, error) {
+func DeleteAllResourcesWithKindMatchingLabel(ctx context.Context, kClient client.Client, gvk schema.GroupVersionKind, resourceLabels map[string]string, namespace string, logger logr.Logger) (bool, error) {
 	resourceList := &unstructured.UnstructuredList{}
 	resourceList.SetGroupVersionKind(gvk)
-	listOptions := client.ListOptions{LabelSelector: labels.SelectorFromSet(resourceLabels)}
+	listOptions := client.ListOptions{LabelSelector: labels.SelectorFromSet(resourceLabels), Namespace: namespace}
 	err := kClient.List(ctx, resourceList, &listOptions)
 	if err != nil {
 		return true, err
@@ -53,7 +53,7 @@ func getResourceNames(items []unstructured.Unstructured) []string {
 }
 
 // finalizers must be less than 64 characters
-func addFinalizers(ctx context.Context, client client.Client, resource client.Object, finalizers []string, logger logr.Logger) (ctrl.Result, error) {
+func AddFinalizers(ctx context.Context, client client.Client, resource client.Object, finalizers []string, logger logr.Logger) (ctrl.Result, error) {
 	logger.Info("Adding missing finalizers",
 		"expectedFinalizers", finalizers,
 		"existingFinalizers", resource.GetFinalizers(),
@@ -67,7 +67,7 @@ func addFinalizers(ctx context.Context, client client.Client, resource client.Ob
 	return fastRequeue, nil
 }
 
-func finalizersAreMissing(resource client.Object, finalizers []string) bool {
+func FinalizersAreMissing(resource client.Object, finalizers []string) bool {
 	for _, finalizer := range finalizers {
 		if !controllerutil.ContainsFinalizer(resource, finalizer) {
 			return true
@@ -76,7 +76,7 @@ func finalizersAreMissing(resource client.Object, finalizers []string) bool {
 	return false
 }
 
-func finalizersAreDeleted(resource client.Object, finalizers []string) bool {
+func FinalizersAreDeleted(resource client.Object, finalizers []string) bool {
 	for _, finalizer := range finalizers {
 		if controllerutil.ContainsFinalizer(resource, finalizer) {
 			return false

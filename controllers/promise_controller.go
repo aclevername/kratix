@@ -19,21 +19,24 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"time"
 
 	controllerutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -48,12 +51,12 @@ type PromiseReconciler struct {
 }
 
 const (
-	finalizerPrefix                                    = "kratix.io/"
-	clusterSelectorsConfigMapCleanupFinalizer          = finalizerPrefix + "cluster-selectors-config-map-cleanup"
-	resourceRequestCleanupFinalizer                    = finalizerPrefix + "resource-request-cleanup"
-	dynamicControllerDependantResourcesCleaupFinalizer = finalizerPrefix + "dynamic-controller-dependant-resources-cleanup"
-	crdCleanupFinalizer                                = finalizerPrefix + "crd-cleanup"
-	workerClusterResourcesCleanupFinalizer             = finalizerPrefix + "worker-cluster-resources-cleanup"
+	FinalizerPrefix                                    = "kratix.io/"
+	clusterSelectorsConfigMapCleanupFinalizer          = FinalizerPrefix + "cluster-selectors-config-map-cleanup"
+	resourceRequestCleanupFinalizer                    = FinalizerPrefix + "resource-request-cleanup"
+	dynamicControllerDependantResourcesCleaupFinalizer = FinalizerPrefix + "dynamic-controller-dependant-resources-cleanup"
+	crdCleanupFinalizer                                = FinalizerPrefix + "crd-cleanup"
+	workerClusterResourcesCleanupFinalizer             = FinalizerPrefix + "worker-cluster-resources-cleanup"
 )
 
 var (
@@ -83,6 +86,11 @@ var (
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;list;get;watch;delete
 
 //+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="apps",resources=deployments,verbs=create;list;watch;delete
+
+//TODO remove and use created role
+//+kubebuilder:rbac:groups="",resources=pods,verbs=create;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create
 
 func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	promise := &v1alpha1.Promise{}
@@ -102,8 +110,8 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	finalizers := getDesiredFinalizers(promise)
-	if finalizersAreMissing(promise, finalizers) {
-		return addFinalizers(ctx, r.Client, promise, finalizers, logger)
+	if FinalizersAreMissing(promise, finalizers) {
+		return AddFinalizers(ctx, r.Client, promise, finalizers, logger)
 	}
 
 	if err := r.createWorkResourceForWorkerClusterResources(ctx, promise, logger); err != nil {
@@ -126,14 +134,15 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return defaultRequeue, nil
 	}
 
-	if err := r.createResourcesForDynamicController(ctx, promise, rrCRD, rrGVK, logger); err != nil {
-		// Since we don't support Updates we cannot tell if createResourcesForDynamicController fails because the resources
-		// already exist or for other reasons, so we don't handle the error or requeue
-		// TODO add support for updates and gracefully error
-		return ctrl.Result{}, nil
+	err = r.createResourcesForDynamicController(ctx, promise, rrCRD, rrGVK, logger)
+	if err != nil {
+		logger.Error(err, "creating dynamic controller")
 	}
+	// Since we don't support Updates we cannot tell if createResourcesForDynamicController fails because the resources
+	// already exist or for other reasons, so we don't handle the error or requeue
+	// TODO add support for updates and gracefully error
+	return ctrl.Result{}, nil
 
-	return ctrl.Result{}, r.startDynamicController(promise, rrGVK)
 }
 
 func getDesiredFinalizers(promise *v1alpha1.Promise) []string {
@@ -141,31 +150,6 @@ func getDesiredFinalizers(promise *v1alpha1.Promise) []string {
 		return []string{workerClusterResourcesCleanupFinalizer}
 	}
 	return promiseFinalizers
-}
-
-func (r *PromiseReconciler) startDynamicController(promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind) error {
-	//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
-	//once resolved, delete dynamic controller rather than disable
-	enabled := true
-	r.DynamicControllers[string(promise.GetUID())] = &enabled
-	dynamicResourceRequestController := &dynamicResourceRequestController{
-		Client:                 r.Manager.GetClient(),
-		scheme:                 r.Manager.GetScheme(),
-		gvk:                    &rrGVK,
-		promiseIdentifier:      promise.GetIdentifier(),
-		promiseClusterSelector: promise.Spec.ClusterSelector,
-		xaasRequestPipeline:    promise.Spec.XaasRequestPipeline,
-		log:                    r.Log,
-		uid:                    string(promise.GetUID())[0:5],
-		enabled:                &enabled,
-	}
-
-	unstructuredCRD := &unstructured.Unstructured{}
-	unstructuredCRD.SetGroupVersionKind(rrGVK)
-
-	return ctrl.NewControllerManagedBy(r.Manager).
-		For(unstructuredCRD).
-		Complete(dynamicResourceRequestController)
 }
 
 func (r *PromiseReconciler) createResourcesForDynamicController(ctx context.Context, promise *v1alpha1.Promise,
@@ -283,6 +267,8 @@ func (r *PromiseReconciler) createResourcesForDynamicController(ctx context.Cont
 			},
 		},
 	}
+
+	logger.Info("Creating CRB")
 	err = r.Client.Create(ctx, &crb)
 	if err != nil {
 		logger.Error(err, "Error creating ClusterRoleBinding")
@@ -309,9 +295,101 @@ func (r *PromiseReconciler) createResourcesForDynamicController(ctx context.Cont
 		},
 	}
 
+	logger.Info("Creating selector configmap")
 	err = r.Client.Create(ctx, &configMap)
 	if err != nil {
 		logger.Error(err, "Error creating config map", "configMap", configMap.Name)
+	}
+
+	controllerName := promise.GetControllerResourceName()
+	controllerNamespace := "kratix-platform-system"
+	controllerConfigMap := v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      controllerName,
+			Namespace: controllerNamespace,
+			Labels:    promise.GenerateSharedLabels(),
+		},
+		Data: map[string]string{
+			"selectors":  labels.FormatLabels(promise.Spec.ClusterSelector),
+			"identifier": promise.GetIdentifier(),
+			"pipeline":   strings.Join(promise.Spec.XaasRequestPipeline, ","),
+			"uid":        string(promise.GetUID()),
+			"group":      rrGVK.Group,
+			"version":    rrGVK.Version,
+			"kind":       rrGVK.Kind,
+		},
+	}
+
+	logger.Info("Creating controller configmap")
+	err = r.Client.Create(ctx, &controllerConfigMap)
+	if err != nil {
+		logger.Error(err, "Error creating config map", "configMap", controllerConfigMap.Name)
+	}
+
+	replicas := int32(1)
+	pod := appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      controllerName,
+			Namespace: controllerNamespace,
+			Labels:    promise.GenerateSharedLabels(),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: promise.GenerateSharedLabels()},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      controllerName,
+					Namespace: controllerNamespace,
+					Labels:    promise.GenerateSharedLabels(),
+				},
+				Spec: v1.PodSpec{
+					RestartPolicy:      v1.RestartPolicyAlways,
+					ServiceAccountName: "kratix-platform-controller-manager",
+					Volumes: []v1.Volume{
+						{
+							Name: "config",
+							VolumeSource: v1.VolumeSource{
+								ConfigMap: &v1.ConfigMapVolumeSource{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: controllerName,
+									},
+								},
+							},
+						},
+					},
+					Containers: []v1.Container{
+						{
+							Name:    "controller",
+							Image:   "aclevername/dynamic-controller:v0.1.0",
+							Command: []string{"/manager"},
+							Env: []v1.EnvVar{
+								{Name: "WC_IMG", Value: os.Getenv("WC_IMG")},
+							},
+							VolumeMounts: []v1.VolumeMount{
+								{
+									MountPath: "/config",
+									Name:      "config",
+								},
+							},
+							LivenessProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{
+									HTTPGet: &v1.HTTPGetAction{
+										Path: "/readyz",
+										Port: intstr.IntOrString{IntVal: int32(8081)},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	logger.Info("Creating controller deployment")
+	err = r.Client.Create(ctx, &pod)
+	if err != nil {
+		logger.Error(err, "Error creating pod", "pod", pod.Name)
 	}
 	return nil
 }
@@ -336,7 +414,7 @@ func (r *PromiseReconciler) ensureCRDExists(ctx context.Context, rrCRD *apiexten
 }
 
 func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) (ctrl.Result, error) {
-	if finalizersAreDeleted(promise, promiseFinalizers) {
+	if FinalizersAreDeleted(promise, promiseFinalizers) {
 		return ctrl.Result{}, nil
 	}
 
@@ -347,12 +425,6 @@ func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1alpha1
 			return defaultRequeue, err
 		}
 		return fastRequeue, nil
-	}
-
-	//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
-	//once resolved, delete dynamic controller rather than disable
-	if enabled, exists := r.DynamicControllers[string(promise.GetUID())]; exists {
-		*enabled = false
 	}
 
 	if controllerutil.ContainsFinalizer(promise, clusterSelectorsConfigMapCleanupFinalizer) {
@@ -417,7 +489,31 @@ func (r *PromiseReconciler) deleteDynamicControllerResources(ctx context.Context
 	})
 
 	for _, gvk := range resourcesToDelete {
-		resourcesRemaining, err := deleteAllResourcesWithKindMatchingLabel(ctx, r.Client, gvk, promise.GenerateSharedLabels(), logger)
+		resourcesRemaining, err := DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, gvk, promise.GenerateSharedLabels(), "default", logger)
+		if err != nil {
+			return err
+		}
+
+		if resourcesRemaining {
+			return nil
+		}
+	}
+
+	var controllerResourcesToDelete []schema.GroupVersionKind
+	controllerResourcesToDelete = append(controllerResourcesToDelete, schema.GroupVersionKind{
+		Group:   appsv1.SchemeGroupVersion.Group,
+		Version: appsv1.SchemeGroupVersion.Version,
+		Kind:    "Deployment",
+	})
+
+	controllerResourcesToDelete = append(controllerResourcesToDelete, schema.GroupVersionKind{
+		Group:   v1.SchemeGroupVersion.Group,
+		Version: v1.SchemeGroupVersion.Version,
+		Kind:    "ConfigMap",
+	})
+
+	for _, gvk := range controllerResourcesToDelete {
+		resourcesRemaining, err := DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, gvk, promise.GenerateSharedLabels(), "kratix-platform-system", logger)
 		if err != nil {
 			return err
 		}
@@ -438,7 +534,7 @@ func (r *PromiseReconciler) deleteResourceRequests(ctx context.Context, promise 
 	}
 
 	// No need to pass labels since all resource requests are of Kind
-	resourcesRemaining, err := deleteAllResourcesWithKindMatchingLabel(ctx, r.Client, rrGVK, nil, logger)
+	resourcesRemaining, err := DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, rrGVK, nil, "default", logger)
 	if err != nil {
 		return err
 	}
@@ -460,7 +556,7 @@ func (r *PromiseReconciler) deleteConfigMap(ctx context.Context, promise *v1alph
 		Kind:    "ConfigMap",
 	}
 
-	resourcesRemaining, err := deleteAllResourcesWithKindMatchingLabel(ctx, r.Client, gvk, promise.GenerateSharedLabels(), logger)
+	resourcesRemaining, err := DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, gvk, promise.GenerateSharedLabels(), "default", logger)
 	if err != nil {
 		return err
 	}
@@ -480,7 +576,7 @@ func (r *PromiseReconciler) deleteCRDs(ctx context.Context, promise *v1alpha1.Pr
 		Kind:    "CustomResourceDefinition",
 	}
 
-	resourcesRemaining, err := deleteAllResourcesWithKindMatchingLabel(ctx, r.Client, crdGVK, promise.GenerateSharedLabels(), logger)
+	resourcesRemaining, err := DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, crdGVK, promise.GenerateSharedLabels(), "default", logger)
 	if err != nil {
 		return err
 	}
@@ -502,7 +598,7 @@ func (r *PromiseReconciler) deleteWork(ctx context.Context, promise *v1alpha1.Pr
 		Kind:    "Work",
 	}
 
-	resourcesRemaining, err := deleteAllResourcesWithKindMatchingLabel(ctx, r.Client, workGVK, promise.GenerateSharedLabels(), logger)
+	resourcesRemaining, err := DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, workGVK, promise.GenerateSharedLabels(), "default", logger)
 	if err != nil {
 		return err
 	}

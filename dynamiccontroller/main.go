@@ -1,24 +1,25 @@
-/*
-Copyright 2021 Syntasso.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
-package controllers
+package main
 
 import (
-	"context"
+	"flag"
+	"io/ioutil"
 	"os"
+
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
+	// to ensure that exec-entrypoint and run can make use of them.
+	"go.uber.org/zap/zapcore"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/lib/writers"
+
+	//+kubebuilder:scaffold:imports
+	"context"
 	"strconv"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/controllers"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,14 +48,143 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+type Config struct {
+	Selectors  string
+	Identifier string
+	Pipeline   string
+	UID        string
+	Group      string
+	Version    string
+	Kind       string
+}
+
+var setupLog = ctrl.Log.WithName("setup")
+
+func init() {
+	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
+	//+kubebuilder:scaffold:scheme
+}
+
+func main() {
+	var metricsAddr string
+	var enableLeaderElection bool
+	var probeAddr string
+	var repositoryType string
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&repositoryType, "repository-type", writers.S3, "The type of the repository Kratix will communicate with")
+	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+		"Enable leader election for controller manager. "+
+			"Enabling this will ensure there is only one active controller manager.")
+	opts := zap.Options{
+		Development: true,
+	}
+	opts.BindFlags(flag.CommandLine)
+	flag.Parse()
+
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts), func(o *zap.Options) {
+		o.TimeEncoder = zapcore.TimeEncoderOfLayout("2006-01-02T15:04:05Z07:00")
+	}))
+
+	config := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(config, ctrl.Options{
+		Scheme:                 scheme.Scheme,
+		MetricsBindAddress:     metricsAddr,
+		Port:                   9443,
+		HealthProbeBindAddress: probeAddr,
+		LeaderElection:         enableLeaderElection,
+		LeaderElectionID:       "2743c979.kratix.io",
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	dynamicConfig := Config{
+		Selectors:  readOrExit("/config/selectors"),
+		Identifier: readOrExit("/config/identifier"),
+		Pipeline:   readOrExit("/config/pipeline"),
+		UID:        readOrExit("/config/uid"),
+		Group:      readOrExit("/config/group"),
+		Version:    readOrExit("/config/version"),
+		Kind:       readOrExit("/config/kind"),
+	}
+	var selectors labels.Set
+
+	if dynamicConfig.Selectors != "<none>" {
+		selectors, err = labels.ConvertSelectorToLabelsMap(dynamicConfig.Selectors)
+
+		if err != nil {
+			setupLog.Error(err, "unable to gen selectors")
+			os.Exit(1)
+		}
+	}
+
+	rrGVK := schema.GroupVersionKind{
+		Group:   dynamicConfig.Group,
+		Version: dynamicConfig.Version,
+		Kind:    dynamicConfig.Kind,
+	}
+
+	dynamicResourceRequestController := DynamicResourceRequestController{
+		Client:                 mgr.GetClient(),
+		scheme:                 mgr.GetScheme(),
+		gvk:                    &rrGVK,
+		promiseIdentifier:      dynamicConfig.Identifier,
+		promiseClusterSelector: selectors,
+		xaasRequestPipeline:    strings.Split(dynamicConfig.Pipeline, ","),
+		uid:                    dynamicConfig.UID,
+		log:                    ctrl.Log.WithName("controllers").WithName("Dynamic").WithName(dynamicConfig.Identifier),
+	}
+
+	unstructuredCRD := &unstructured.Unstructured{}
+	unstructuredCRD.SetGroupVersionKind(rrGVK)
+
+	ctrl.NewControllerManagedBy(mgr).
+		For(unstructuredCRD).
+		Complete(&dynamicResourceRequestController)
+
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to set up health check")
+		os.Exit(1)
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
+
+	setupLog.Info("starting manager")
+	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+		setupLog.Error(err, "problem running manager")
+		os.Exit(1)
+	}
+}
+
+func readOrExit(filename string) string {
+	bytes, err := ioutil.ReadFile(filename)
+	if err != nil {
+		setupLog.Error(err, "unable to read config")
+		os.Exit(1)
+	}
+	return string(bytes)
+}
+
 const (
-	workFinalizer     = finalizerPrefix + "work-cleanup"
-	pipelineFinalizer = finalizerPrefix + "pipeline-cleanup"
+	workFinalizer     = controllers.FinalizerPrefix + "work-cleanup"
+	pipelineFinalizer = controllers.FinalizerPrefix + "pipeline-cleanup"
 )
 
-var rrFinalizers = []string{workFinalizer, pipelineFinalizer}
+var (
+	rrFinalizers = []string{workFinalizer, pipelineFinalizer}
+	// fastRequeue can be used whenever we want to quickly requeue, and we don't expect
+	// an error to occur. Example: we delete a resource, we then requeue
+	// to check it's been deleted. Here we can use a fastRequeue instead of a defaultRequeue
+	fastRequeue    = ctrl.Result{RequeueAfter: 1 * time.Second}
+	defaultRequeue = ctrl.Result{RequeueAfter: 5 * time.Second}
+	slowRequeue    = ctrl.Result{RequeueAfter: 15 * time.Second}
+)
 
-type dynamicResourceRequestController struct {
+type DynamicResourceRequestController struct {
 	//use same naming conventions as other controllers
 	Client                 client.Client
 	gvk                    *schema.GroupVersionKind
@@ -64,19 +195,9 @@ type dynamicResourceRequestController struct {
 	log                    logr.Logger
 	finalizers             []string
 	uid                    string
-	enabled                *bool
 }
 
-//+kubebuilder:rbac:groups="",resources=pods,verbs=create;list;watch;delete
-//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create
-
-func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	if !*r.enabled {
-		//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
-		//once resolved, this won't be necessary since the dynamic controller will be deleted
-		return ctrl.Result{}, nil
-	}
-
+func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.log.WithValues("uid", r.uid, r.promiseIdentifier, req.NamespacedName)
 	resourceRequestIdentifier := fmt.Sprintf("%s-%s-%s", r.promiseIdentifier, req.Namespace, req.Name)
 
@@ -97,8 +218,8 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 	}
 
 	// Reconcile necessary finalizers
-	if finalizersAreMissing(rr, []string{workFinalizer, pipelineFinalizer}) {
-		return addFinalizers(ctx, r.Client, rr, []string{workFinalizer, pipelineFinalizer}, logger)
+	if controllers.FinalizersAreMissing(rr, []string{workFinalizer, pipelineFinalizer}) {
+		return controllers.AddFinalizers(ctx, r.Client, rr, []string{workFinalizer, pipelineFinalizer}, logger)
 	}
 
 	if r.pipelineHasExecuted(resourceRequestIdentifier) {
@@ -176,7 +297,7 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 	return ctrl.Result{}, nil
 }
 
-func (r *dynamicResourceRequestController) pipelineHasExecuted(resourceRequestIdentifier string) bool {
+func (r *DynamicResourceRequestController) pipelineHasExecuted(resourceRequestIdentifier string) bool {
 	isPromise, _ := labels.NewRequirement("kratix-promise-resource-request-id", selection.Equals, []string{resourceRequestIdentifier})
 	selector := labels.NewSelector().
 		Add(*isPromise)
@@ -195,8 +316,8 @@ func (r *dynamicResourceRequestController) pipelineHasExecuted(resourceRequestId
 	return len(ol.Items) > 0
 }
 
-func (r *dynamicResourceRequestController) deleteResources(ctx context.Context, resourceRequest *unstructured.Unstructured, resourceRequestIdentifier string, logger logr.Logger) (ctrl.Result, error) {
-	if finalizersAreDeleted(resourceRequest, rrFinalizers) {
+func (r *DynamicResourceRequestController) deleteResources(ctx context.Context, resourceRequest *unstructured.Unstructured, resourceRequestIdentifier string, logger logr.Logger) (ctrl.Result, error) {
+	if controllers.FinalizersAreDeleted(resourceRequest, rrFinalizers) {
 		return ctrl.Result{}, nil
 	}
 
@@ -219,7 +340,7 @@ func (r *dynamicResourceRequestController) deleteResources(ctx context.Context, 
 	return fastRequeue, nil
 }
 
-func (r *dynamicResourceRequestController) deleteWork(ctx context.Context, resourceRequest *unstructured.Unstructured, workName string, finalizer string, logger logr.Logger) error {
+func (r *DynamicResourceRequestController) deleteWork(ctx context.Context, resourceRequest *unstructured.Unstructured, workName string, finalizer string, logger logr.Logger) error {
 	work := &v1alpha1.Work{}
 	err := r.Client.Get(ctx, types.NamespacedName{
 		Namespace: "default",
@@ -257,7 +378,7 @@ func (r *dynamicResourceRequestController) deleteWork(ctx context.Context, resou
 	return nil
 }
 
-func (r *dynamicResourceRequestController) deletePipeline(ctx context.Context, resourceRequest *unstructured.Unstructured, resourceRequestIdentifier, finalizer string, logger logr.Logger) error {
+func (r *DynamicResourceRequestController) deletePipeline(ctx context.Context, resourceRequest *unstructured.Unstructured, resourceRequestIdentifier, finalizer string, logger logr.Logger) error {
 	podGVK := schema.GroupVersionKind{
 		Group:   v1.SchemeGroupVersion.Group,
 		Version: v1.SchemeGroupVersion.Version,
@@ -269,7 +390,7 @@ func (r *dynamicResourceRequestController) deletePipeline(ctx context.Context, r
 		"kratix-promise-resource-request-id": resourceRequestIdentifier,
 	}
 
-	resourcesRemaining, err := deleteAllResourcesWithKindMatchingLabel(ctx, r.Client, podGVK, podLabels, logger)
+	resourcesRemaining, err := controllers.DeleteAllResourcesWithKindMatchingLabel(ctx, r.Client, podGVK, podLabels, "default", logger)
 	if err != nil {
 		return err
 	}
@@ -293,7 +414,7 @@ func getShortUuid() string {
 	}
 }
 
-func (r *dynamicResourceRequestController) setPipelineCondition(ctx context.Context, rr *unstructured.Unstructured, logger logr.Logger) error {
+func (r *DynamicResourceRequestController) setPipelineCondition(ctx context.Context, rr *unstructured.Unstructured, logger logr.Logger) error {
 	setter := conditionsutil.UnstructuredSetter(rr)
 	getter := conditionsutil.UnstructuredGetter(rr)
 	condition := conditionsutil.Get(getter, clusterv1.ConditionType("PipelineCompleted"))
@@ -317,7 +438,7 @@ func (r *dynamicResourceRequestController) setPipelineCondition(ctx context.Cont
 	return nil
 }
 
-func (r *dynamicResourceRequestController) pipelineInitContainers(rrID string, req ctrl.Request) ([]v1.Container, []v1.Volume) {
+func (r *DynamicResourceRequestController) pipelineInitContainers(rrID string, req ctrl.Request) ([]v1.Container, []v1.Volume) {
 	resourceKindNameNamespace := fmt.Sprintf("%s.%s %s --namespace %s", strings.ToLower(r.gvk.Kind), r.gvk.Group, req.Name, req.Namespace)
 	metadataVolumeMount := v1.VolumeMount{MountPath: "/metadata", Name: "metadata"}
 

@@ -1,0 +1,12 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseController
+metadata:
+  labels:
+    app.kubernetes.io/name: promisecontroller
+    app.kubernetes.io/instance: promisecontroller-sample
+    app.kubernetes.io/part-of: kratix
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kratix
+  name: promisecontroller-sample
+spec:
+  # TODO(user): Add fields here

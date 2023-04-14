@@ -42,6 +42,7 @@ var setupLog = ctrl.Log.WithName("setup")
 
 func init() {
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(platformv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -127,6 +128,13 @@ func main() {
 		BucketWriter: bucketWriter,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkPlacement")
+		os.Exit(1)
+	}
+	if err = (&controllers.PromiseControllerReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PromiseController")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

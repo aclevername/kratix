@@ -43,7 +43,9 @@ type PromiseSpec struct {
 	//
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:EmbeddedResource
-	XaasCrd runtime.RawExtension `json:"xaasCrd,omitempty"`
+	XaasCrd runtime.RawExtension   `json:"xaasCrd,omitempty"`
+	Values  map[string]interface{} `json:"values,omitempty"`
+	Version string                 `json:"version,omitempty"`
 
 	// Array of Image tags to transform from input request custom resource to output resource(s)
 	XaasRequestPipeline []string `json:"xaasRequestPipeline,omitempty"`
@@ -77,6 +79,12 @@ type Promise struct {
 
 	Spec   PromiseSpec   `json:"spec,omitempty"`
 	Status PromiseStatus `json:"status,omitempty"`
+}
+
+func (p *Promise) DoesNotContainValues() bool {
+	// if a request pipeline is set but there is not a CRD the pipeline is ignored
+	// TODO how can we prevent this scenario from happening
+	return len(p.Spec.Values) == 0
 }
 
 func (p *Promise) DoesNotContainXAASCrd() bool {

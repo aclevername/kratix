@@ -111,15 +111,23 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	if promise.DoesNotContainXAASCrd() {
+	if promise.DoesNotContainValues() {
 		logger.Info("Promise only contains WCRs, skipping creation of CRD and dynamic controller")
 		return ctrl.Result{}, nil
 	}
 
-	rrCRD, rrGVK, err := generateCRDAndGVK(promise, logger)
-	if err != nil {
-		return ctrl.Result{}, err
+	// rrCRD, rrGVK, err := generateCRDAndGVK(promise, logger)
+	// if err != nil {
+	// 	return ctrl.Result{}, err
+	// }
+
+	rrGVK := schema.GroupVersionKind{
+		Group:   "promise.platform.internal",
+		Version: promise.Spec.Version,
+		Kind:    promise.Name,
 	}
+
+	rrCRD := r.convertValuesToCRD(ctx, promise, logger)
 
 	exists := r.ensureCRDExists(ctx, rrCRD, rrGVK, logger)
 	if !exists {
@@ -618,4 +626,66 @@ func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx cont
 	}
 
 	return nil
+}
+
+func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind, logger logr.Logger) error {
+	var validationSchema *apiextensionsv1.JSONSchemaProps = &apiextensionsv1.JSONSchemaProps{
+		Type:     "object",
+		Properties: map[string]apiextensionsv1.JSONSchemaProps{
+			"alpha": {
+				Description: "Alpha is an alphanumeric string with underscores",
+				Type:        "string",
+				Pattern:     "^[a-zA-Z0-9_]*$",
+			},
+			"beta": {
+				Description: "Minimum value of beta is 10",
+				Type:        "number",
+				Minimum:     float64Ptr(10),
+			},
+			// "gamma": {
+			// 	Description: "Gamma is restricted to foo, bar and baz",
+			// 	Type:        "string",
+			// 	Enum: []apiextensionsv1.JSON{
+			// 		{
+			// 			Raw: []byte(`"foo"`),
+			// 		},
+			// 		{
+			// 			Raw: []byte(`"bar"`),
+			// 		},
+			// 		{
+			// 			Raw: []byte(`"baz"`),
+			// 		},
+			// 	},
+			// },
+		},
+	}
+
+	xaasCRD := apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: rrGVK.Kind + "." + promise.Group},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: rrGVK.Group,
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural:   promise.Name, // + "s"
+				Singular: promise.Name,
+				Kind:     promise.Name,
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    promise.Spec.Version,
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+							OpenAPIV3Schema: validationSchema,
+						}
+				},
+			},
+		},
+	}
+
+	schema := json
+
+	for key, value := range promise.Spec.Values {
+
+	}
 }

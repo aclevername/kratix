@@ -1,0 +1,22 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: Promise
+metadata:
+  creationTimestamp: null
+  name: namespace
+  namespace: default
+spec:
+  workerClusterResources: []
+  xaasCrd:
+    apiVersion: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    metadata:
+      name: namespaces.marketplace.kratix.io
+    spec:
+      group: marketplace.kratix.io
+      names:
+        kind: namespace
+        plural: namespaces
+        singular: namespace
+      scope: Namespaced
+      versions:
+        - name: v1alpha1

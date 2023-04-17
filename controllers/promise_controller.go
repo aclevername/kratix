@@ -630,7 +630,7 @@ func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx cont
 
 func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind, logger logr.Logger) error {
 	var validationSchema *apiextensionsv1.JSONSchemaProps = &apiextensionsv1.JSONSchemaProps{
-		Type:     "object",
+		Type: "object",
 		Properties: map[string]apiextensionsv1.JSONSchemaProps{
 			"alpha": {
 				Description: "Alpha is an alphanumeric string with underscores",
@@ -676,8 +676,8 @@ func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1a
 					Served:  true,
 					Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{
-							OpenAPIV3Schema: validationSchema,
-						}
+						OpenAPIV3Schema: validationSchema,
+					},
 				},
 			},
 		},

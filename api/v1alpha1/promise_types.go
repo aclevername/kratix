@@ -43,9 +43,9 @@ type PromiseSpec struct {
 	//
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:EmbeddedResource
-	XaasCrd runtime.RawExtension   `json:"xaasCrd,omitempty"`
 	Values  map[string]interface{} `json:"values,omitempty"`
 	Version string                 `json:"version,omitempty"`
+	XaasCrd runtime.RawExtension   `json:"xaasCrd,omitempty"`
 
 	// Array of Image tags to transform from input request custom resource to output resource(s)
 	XaasRequestPipeline []string `json:"xaasRequestPipeline,omitempty"`

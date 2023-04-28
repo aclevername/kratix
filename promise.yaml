@@ -1,0 +1,21 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: Promise
+metadata:
+  name: bash
+  namespace: default
+spec:
+  api:
+    version: v1alpha1
+    kind: Bash
+    group: acme.org.io
+    template:
+      container0Cmd: "bash command"
+      container1Cmd: "bash command"
+      envVars: {}
+  xaasRequestPipeline:
+    - syntassodev/bash-promise-test-c0:dev
+  workerClusterResources:
+    - apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: bash-wcr-namespace

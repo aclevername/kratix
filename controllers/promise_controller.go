@@ -19,10 +19,13 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	controllerutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	pluralize "github.com/gertd/go-pluralize"
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
@@ -122,12 +125,15 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// }
 
 	rrGVK := schema.GroupVersionKind{
-		Group:   "promise.platform.internal",
-		Version: promise.Spec.Version,
-		Kind:    promise.Name,
+		Group:   promise.Spec.API.Group,
+		Version: promise.Spec.API.Version,
+		Kind:    promise.Spec.API.Kind,
 	}
 
-	rrCRD := r.convertValuesToCRD(ctx, promise, logger)
+	rrCRD, err := r.convertValuesToCRD(ctx, promise, rrGVK, logger)
+	if err != nil {
+		panic(err)
+	}
 
 	exists := r.ensureCRDExists(ctx, rrCRD, rrGVK, logger)
 	if !exists {
@@ -628,51 +634,29 @@ func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx cont
 	return nil
 }
 
-func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind, logger logr.Logger) error {
+func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, error) {
 	var validationSchema *apiextensionsv1.JSONSchemaProps = &apiextensionsv1.JSONSchemaProps{
-		Type: "object",
-		Properties: map[string]apiextensionsv1.JSONSchemaProps{
-			"alpha": {
-				Description: "Alpha is an alphanumeric string with underscores",
-				Type:        "string",
-				Pattern:     "^[a-zA-Z0-9_]*$",
-			},
-			"beta": {
-				Description: "Minimum value of beta is 10",
-				Type:        "number",
-				Minimum:     float64Ptr(10),
-			},
-			// "gamma": {
-			// 	Description: "Gamma is restricted to foo, bar and baz",
-			// 	Type:        "string",
-			// 	Enum: []apiextensionsv1.JSON{
-			// 		{
-			// 			Raw: []byte(`"foo"`),
-			// 		},
-			// 		{
-			// 			Raw: []byte(`"bar"`),
-			// 		},
-			// 		{
-			// 			Raw: []byte(`"baz"`),
-			// 		},
-			// 	},
-			// },
-		},
+		Type:       "object",
+		Properties: map[string]apiextensionsv1.JSONSchemaProps{},
 	}
 
-	xaasCRD := apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: rrGVK.Kind + "." + promise.Group},
+	for key, value := range promise.Spec.API.Template {
+		validationSchema.Properties[key] = getJSONSchema(key, value, logger)
+	}
+
+	xaasCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: rrGVK.Kind + "." + rrGVK.Group},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
 			Group: rrGVK.Group,
 			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural:   promise.Name, // + "s"
-				Singular: promise.Name,
-				Kind:     promise.Name,
+				Plural:   pluralize.NewClient().Plural(rrGVK.Kind),
+				Singular: strings.ToLower(rrGVK.Kind),
+				Kind:     rrGVK.Kind,
 			},
 			Scope: apiextensionsv1.NamespaceScoped,
 			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
 				{
-					Name:    promise.Spec.Version,
+					Name:    promise.Spec.API.Version,
 					Served:  true,
 					Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{
@@ -683,9 +667,46 @@ func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1a
 		},
 	}
 
-	schema := json
+	return xaasCRD, nil
+}
 
-	for key, value := range promise.Spec.Values {
-
+func getJSONSchema(key string, value interface{}, logger logr.Logger) apiextensionsv1.JSONSchemaProps {
+	switch valueType := value.(type) {
+	case string:
+		logger.Info(fmt.Sprintf("found %v string: %v %v\n", valueType, key, value))
+		return apiextensionsv1.JSONSchemaProps{
+			Type: "string",
+		}
+	case int, int16, int32, int64:
+		logger.Info(fmt.Sprintf("found %v integer: %v %v\n", valueType, key, value))
+		return apiextensionsv1.JSONSchemaProps{
+			Type: "integer",
+		}
+	case bool:
+		logger.Info(fmt.Sprintf("found %v boolean: %v %v\n", valueType, key, value))
+		return apiextensionsv1.JSONSchemaProps{
+			Type: "boolean",
+		}
+	// case []interface{}:
+	// 	logger.Info(fmt.Sprintf("found %v array: %v %v\n", valueType, key, value))
+	// 	return apiextensionsv1.JSONSchemaProps{
+	// 		Type: "array",
+	// 		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+	// 			Type: "string",
+	// 		},
+	// 	}
+	case map[string]interface{}:
+		logger.Info(fmt.Sprintf("found %v string: %v %v\n", valueType, key, value))
+		jsonSchema := map[string]apiextensionsv1.JSONSchemaProps{}
+		for key, value := range valueType {
+			jsonSchema[key] = getJSONSchema(key, value, logger)
+		}
+		return apiextensionsv1.JSONSchemaProps{
+			Type:       "object",
+			Properties: jsonSchema,
+		}
+	default:
+		logger.Info(fmt.Sprintf("found type unaware of: %v, for k/v: %v %v\n", valueType, key, value))
+		panic("unknown type")
 	}
 }

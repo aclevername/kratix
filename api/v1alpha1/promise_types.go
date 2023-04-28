@@ -43,9 +43,8 @@ type PromiseSpec struct {
 	//
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:EmbeddedResource
-	Values  map[string]interface{} `json:"values,omitempty"`
-	Version string                 `json:"version,omitempty"`
-	XaasCrd runtime.RawExtension   `json:"xaasCrd,omitempty"`
+	API     PromiseAPI           `json:"api,omitempty"`
+	XaasCrd runtime.RawExtension `json:"xaasCrd,omitempty"`
 
 	// Array of Image tags to transform from input request custom resource to output resource(s)
 	XaasRequestPipeline []string `json:"xaasRequestPipeline,omitempty"`
@@ -53,6 +52,13 @@ type PromiseSpec struct {
 	WorkerClusterResources []WorkerClusterResource `json:"workerClusterResources,omitempty"`
 
 	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
+}
+
+type PromiseAPI struct {
+	Version  string                 `json:"version,omitempty"`
+	Kind     string                 `json:"kind,omitempty"`
+	Group    string                 `json:"group,omitempty"`
+	Template map[string]interface{} `json:"template,omitempty"`
 }
 
 // Resources represents the manifest workload to be deployed on worker cluster
@@ -84,7 +90,7 @@ type Promise struct {
 func (p *Promise) DoesNotContainValues() bool {
 	// if a request pipeline is set but there is not a CRD the pipeline is ignored
 	// TODO how can we prevent this scenario from happening
-	return len(p.Spec.Values) == 0
+	return len(p.Spec.API.Template) == 0
 }
 
 func (p *Promise) DoesNotContainXAASCrd() bool {

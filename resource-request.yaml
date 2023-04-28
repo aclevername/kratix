@@ -1,0 +1,27 @@
+apiVersion: acme.org.io/v1alpha1
+kind: jenkins
+metadata:
+  name: example-rr
+spec:
+    name: "test"
+    port: 8080
+    tlsEnabld: true
+    config:
+      experimentalFeatures: true
+    plugins:
+      - "k8s-runner"
+    additionalPorts:
+      - 8081
+    somethingRequiringBoolArray:
+      - false
+    users:
+      - name: "root"
+        permissions: "admin"
+    teamConfigs:
+      - team: team-a
+        members:
+        - foo
+      - team: team-b
+    startUpArgs:
+      - "--max-concurrent"
+      - 5

@@ -1,17 +1,29 @@
 apiVersion: platform.kratix.io/v1alpha1
 kind: Promise
 metadata:
-  name: bash
+  name: jenkins
   namespace: default
 spec:
   api:
     version: v1alpha1
-    kind: Bash
+    kind: jenkins
     group: acme.org.io
     template:
-      container0Cmd: "bash command"
-      container1Cmd: "bash command"
-      envVars: {}
+      name: ""
+      port: 0
+      tlsEnabld: false
+      config: {}
+      plugins:
+        - ""
+      additionalPorts:
+        - 0
+      somethingRequiringBoolArray:
+        - false
+      users:
+        - name: ""
+          permissions: ""
+      teamConfigs: [{}]
+      startUpArgs: []
   xaasRequestPipeline:
     - syntassodev/bash-promise-test-c0:dev
   workerClusterResources:

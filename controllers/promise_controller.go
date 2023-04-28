@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -119,11 +120,6 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// rrCRD, rrGVK, err := generateCRDAndGVK(promise, logger)
-	// if err != nil {
-	// 	return ctrl.Result{}, err
-	// }
-
 	rrGVK := schema.GroupVersionKind{
 		Group:   promise.Spec.API.Group,
 		Version: promise.Spec.API.Version,
@@ -151,7 +147,7 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func getDesiredFinalizers(promise *v1alpha1.Promise) []string {
-	if promise.DoesNotContainXAASCrd() {
+	if promise.DoesNotContainValues() {
 		return []string{workerClusterResourcesCleanupFinalizer}
 	}
 	return promiseFinalizers
@@ -446,9 +442,10 @@ func (r *PromiseReconciler) deleteDynamicControllerResources(ctx context.Context
 }
 
 func (r *PromiseReconciler) deleteResourceRequests(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
-	_, rrGVK, err := generateCRDAndGVK(promise, logger)
-	if err != nil {
-		return err
+	rrGVK := schema.GroupVersionKind{
+		Group:   promise.Spec.API.Group,
+		Version: promise.Spec.API.Version,
+		Kind:    promise.Spec.API.Kind,
 	}
 
 	// No need to pass labels since all resource requests are of Kind
@@ -538,28 +535,6 @@ func (r *PromiseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func generateCRDAndGVK(promise *v1alpha1.Promise, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, schema.GroupVersionKind, error) {
-	rrCRD := &apiextensionsv1.CustomResourceDefinition{}
-	rrGVK := schema.GroupVersionKind{}
-
-	err := json.Unmarshal(promise.Spec.XaasCrd.Raw, rrCRD)
-	if err != nil {
-		logger.Error(err, "Failed unmarshalling CRD")
-		return rrCRD, rrGVK, err
-	}
-	rrCRD.Labels = labels.Merge(rrCRD.Labels, promise.GenerateSharedLabels())
-
-	setStatusFieldsOnCRD(rrCRD)
-
-	rrGVK = schema.GroupVersionKind{
-		Group:   rrCRD.Spec.Group,
-		Version: rrCRD.Spec.Versions[0].Name,
-		Kind:    rrCRD.Spec.Names.Kind,
-	}
-
-	return rrCRD, rrGVK, nil
-}
-
 func setStatusFieldsOnCRD(rrCRD *apiextensionsv1.CustomResourceDefinition) {
 	rrCRD.Spec.Versions[0].Subresources = &apiextensionsv1.CustomResourceSubresources{
 		Status: &apiextensionsv1.CustomResourceSubresourceStatus{},
@@ -640,16 +615,37 @@ func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1a
 		Properties: map[string]apiextensionsv1.JSONSchemaProps{},
 	}
 
-	for key, value := range promise.Spec.API.Template {
-		validationSchema.Properties[key] = getJSONSchema(key, value, logger)
+	var openAPIV3Schema *apiextensionsv1.JSONSchemaProps = &apiextensionsv1.JSONSchemaProps{
+		Type: "object",
+		Properties: map[string]apiextensionsv1.JSONSchemaProps{
+			"spec": *validationSchema,
+		},
 	}
 
+	logger.Info("unmarshalling template")
+	var template map[string]interface{}
+	templateBytes, err := promise.Spec.API.Template.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(templateBytes, &template)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range map[string]interface{}(template) {
+		logger.Info("looping for key value", "key", key, "value", value)
+		validationSchema.Properties[key] = getJSONSchema(value, logger)
+	}
+	pluralKind := strings.ToLower(pluralize.NewClient().Plural(rrGVK.Kind))
 	xaasCRD := &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: rrGVK.Kind + "." + rrGVK.Group},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   pluralKind + "." + rrGVK.Group,
+			Labels: promise.GenerateSharedLabels(),
+		},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
 			Group: rrGVK.Group,
 			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural:   pluralize.NewClient().Plural(rrGVK.Kind),
+				Plural:   pluralKind,
 				Singular: strings.ToLower(rrGVK.Kind),
 				Kind:     rrGVK.Kind,
 			},
@@ -660,53 +656,75 @@ func (r *PromiseReconciler) convertValuesToCRD(ctx context.Context, promise *v1a
 					Served:  true,
 					Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{
-						OpenAPIV3Schema: validationSchema,
+						OpenAPIV3Schema: openAPIV3Schema,
 					},
 				},
 			},
 		},
 	}
+	logger.Info("xaasCRD", "crd", xaasCRD)
 
+	setStatusFieldsOnCRD(xaasCRD)
 	return xaasCRD, nil
 }
 
-func getJSONSchema(key string, value interface{}, logger logr.Logger) apiextensionsv1.JSONSchemaProps {
+func getJSONSchema(value interface{}, logger logr.Logger) apiextensionsv1.JSONSchemaProps {
+	boolTrue := true
+	fmt.Printf("switching on %v: %v", value, reflect.TypeOf(value))
 	switch valueType := value.(type) {
 	case string:
-		logger.Info(fmt.Sprintf("found %v string: %v %v\n", valueType, key, value))
+		logger.Info(fmt.Sprintf("found %v string: %v \n", valueType, value))
 		return apiextensionsv1.JSONSchemaProps{
 			Type: "string",
 		}
-	case int, int16, int32, int64:
-		logger.Info(fmt.Sprintf("found %v integer: %v %v\n", valueType, key, value))
+	case int, int16, int32, int64, int8, float32, float64:
+		logger.Info(fmt.Sprintf("found %v integer: %v \n", valueType, value))
 		return apiextensionsv1.JSONSchemaProps{
 			Type: "integer",
 		}
 	case bool:
-		logger.Info(fmt.Sprintf("found %v boolean: %v %v\n", valueType, key, value))
+		logger.Info(fmt.Sprintf("found %v boolean: %v \n", valueType, value))
 		return apiextensionsv1.JSONSchemaProps{
 			Type: "boolean",
 		}
-	// case []interface{}:
-	// 	logger.Info(fmt.Sprintf("found %v array: %v %v\n", valueType, key, value))
-	// 	return apiextensionsv1.JSONSchemaProps{
-	// 		Type: "array",
-	// 		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
-	// 			Type: "string",
-	// 		},
-	// 	}
-	case map[string]interface{}:
-		logger.Info(fmt.Sprintf("found %v string: %v %v\n", valueType, key, value))
-		jsonSchema := map[string]apiextensionsv1.JSONSchemaProps{}
-		for key, value := range valueType {
-			jsonSchema[key] = getJSONSchema(key, value, logger)
+	case []interface{}:
+		logger.Info(fmt.Sprintf("found %v array: %v \n", valueType, value))
+		v := value.([]interface{})
+		var schemaV apiextensionsv1.JSONSchemaProps
+		if len(v) > 0 {
+			schemaV = getJSONSchema(v[0], logger)
+		} else {
+			schemaV = apiextensionsv1.JSONSchemaProps{
+				// AnyOf: []apiextensionsv1.JSONSchemaProps{
+				// 	{
+				// 		Type: "string",
+				// 	},
+				// 	{
+				// 		Type: "integer",
+				// 	},
+				// },
+				XIntOrString: true,
+			}
 		}
 		return apiextensionsv1.JSONSchemaProps{
-			Type:       "object",
-			Properties: jsonSchema,
+			Type: "array",
+			Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+				Schema: &schemaV,
+			},
+		}
+	case map[string]interface{}:
+		logger.Info(fmt.Sprintf("found %v string: %v %v\n", valueType, value))
+		jsonSchema := map[string]apiextensionsv1.JSONSchemaProps{}
+		for key, value := range valueType {
+			jsonSchema[key] = getJSONSchema(value, logger)
+		}
+		return apiextensionsv1.JSONSchemaProps{
+			Type:                   "object",
+			Properties:             jsonSchema,
+			XPreserveUnknownFields: &boolTrue,
 		}
 	default:
-		logger.Info(fmt.Sprintf("found type unaware of: %v, for k/v: %v %v\n", valueType, key, value))
+		logger.Info(fmt.Sprintf("found type unaware of: %v, for k/v: %v\n", valueType, value))
 		panic("unknown type")
 	}
 }

@@ -17,9 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"encoding/json"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -39,12 +40,7 @@ type PromiseSpec struct {
 	// https://github.com/open-policy-agent/frameworks/blob/1307ba72bce38ee3cf44f94def1bbc41eb4ffa90/constraint/pkg/apis/templates/v1beta1/constrainttemplate_types.go#L46
 	// XaasCrd runtime.RawExtension      `json:"xaasCrd,omitempty"`
 
-	// X's CustomResourceDefinition to create the X-aaS offering
-	//
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:EmbeddedResource
-	API     PromiseAPI           `json:"api,omitempty"`
-	XaasCrd runtime.RawExtension `json:"xaasCrd,omitempty"`
+	API PromiseAPI `json:"api,omitempty"`
 
 	// Array of Image tags to transform from input request custom resource to output resource(s)
 	XaasRequestPipeline []string `json:"xaasRequestPipeline,omitempty"`
@@ -55,10 +51,12 @@ type PromiseSpec struct {
 }
 
 type PromiseAPI struct {
-	Version  string                 `json:"version,omitempty"`
-	Kind     string                 `json:"kind,omitempty"`
-	Group    string                 `json:"group,omitempty"`
-	Template map[string]interface{} `json:"template,omitempty"`
+	Version string `json:"version,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Group   string `json:"group,omitempty"`
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	Template json.RawMessage `json:"template,omitempty"`
 }
 
 // Resources represents the manifest workload to be deployed on worker cluster
@@ -90,13 +88,7 @@ type Promise struct {
 func (p *Promise) DoesNotContainValues() bool {
 	// if a request pipeline is set but there is not a CRD the pipeline is ignored
 	// TODO how can we prevent this scenario from happening
-	return len(p.Spec.API.Template) == 0
-}
-
-func (p *Promise) DoesNotContainXAASCrd() bool {
-	// if a request pipeline is set but there is not a CRD the pipeline is ignored
-	// TODO how can we prevent this scenario from happening
-	return p.Spec.XaasCrd.Raw == nil
+	return p.Spec.API.Template == nil
 }
 
 func (p *Promise) GenerateSharedLabels() map[string]string {

@@ -82,6 +82,7 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 
 	rr := &unstructured.Unstructured{}
 	rr.SetGroupVersionKind(*r.gvk)
+	logger.Info(fmt.Sprintf("recieved reqest for %v/%v", req.Namespace, req.Name))
 
 	err := r.Client.Get(ctx, req.NamespacedName, rr)
 	if err != nil {
@@ -91,6 +92,8 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 		logger.Error(err, "Failed getting Promise CRD")
 		return defaultRequeue, nil
 	}
+
+	logger.Info("got resource", "resource", rr)
 
 	if !rr.GetDeletionTimestamp().IsZero() {
 		return r.deleteResources(ctx, rr, resourceRequestIdentifier, logger)
@@ -311,6 +314,7 @@ func (r *dynamicResourceRequestController) setPipelineCondition(ctx context.Cont
 		})
 		logger.Info("setting condition PipelineCompleted false")
 		if err := r.Client.Status().Update(ctx, rr); err != nil {
+			logger.Error(err, "failed to update condition")
 			return err
 		}
 	}

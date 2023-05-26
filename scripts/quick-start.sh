@@ -178,6 +178,10 @@ patch_statestore() {
 }
 
 setup_platform_cluster() {
+    kubectl apply --context kind-platform -f https://github.com/jetstack/cert-manager/releases/download/v1.7.2/cert-manager.yaml
+    sleep 10
+    kubectl wait --context kind-platform --for=condition=Ready --timeout=120s -n cert-manager pod -l app.kubernetes.io/instance=cert-manager
+
     if ${INSTALL_AND_CREATE_GITEA_REPO}; then
         kubectl --context kind-platform apply --filename "${ROOT}/hack/platform/gitea-install.yaml"
     fi

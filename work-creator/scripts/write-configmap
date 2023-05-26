@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+
+set -euxo pipefail
+
+
+kubectl create configmap configmap-test --from-file=resource=/output/resource.yaml

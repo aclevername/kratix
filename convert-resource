@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+
+set -euxo pipefail
+
+
+echo $RESOURCE > resource.yaml
+container0="$(cat resource.yaml | yq .spec.container0Cmd)"
+container1="$(cat resource.yaml | yq .spec.container0cmd)"
+name="$(cat resource.yaml | yq .metadata.name)"
+namespace="$(cat resource.yaml | yq .metadata.namespace)"
+
+echo $container0
+echo $container1
+
+echo """
+apiVersion: test.kratix.io/v1beta1
+kind: bash
+metadata:
+  name: ${name}
+  namespace: ${namespace}
+spec:
+  container:
+    cmd0: |
+      ${container0}
+    cmd1: |
+      ${container1}
+""" > /output/resource.yaml

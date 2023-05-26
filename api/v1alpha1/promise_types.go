@@ -51,6 +51,8 @@ type PromiseSpec struct {
 	WorkerClusterResources []WorkerClusterResource `json:"workerClusterResources,omitempty"`
 
 	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
+
+	ConversionPipeline string `json:"conversionPipeline,omitempty"`
 }
 
 // Resources represents the manifest workload to be deployed on worker cluster

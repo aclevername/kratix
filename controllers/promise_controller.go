@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"time"
 
 	controllerutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -34,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -116,7 +118,7 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	rrCRD, rrGVK, err := generateCRDAndGVK(promise, logger)
+	rrCRD, rrGVK, rrGVK2, err := generateCRDAndGVK(promise, logger)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -133,7 +135,7 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, r.startDynamicController(promise, rrGVK)
+	return ctrl.Result{}, r.startDynamicController(logger, promise, rrGVK, rrGVK2)
 }
 
 func getDesiredFinalizers(promise *v1alpha1.Promise) []string {
@@ -143,7 +145,7 @@ func getDesiredFinalizers(promise *v1alpha1.Promise) []string {
 	return promiseFinalizers
 }
 
-func (r *PromiseReconciler) startDynamicController(promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind) error {
+func (r *PromiseReconciler) startDynamicController(logger logr.Logger, promise *v1alpha1.Promise, rrGVK, rrGVK2 schema.GroupVersionKind) error {
 	//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
 	//once resolved, delete dynamic controller rather than disable
 	enabled := true
@@ -160,11 +162,31 @@ func (r *PromiseReconciler) startDynamicController(promise *v1alpha1.Promise, rr
 		enabled:                &enabled,
 	}
 
-	unstructuredCRD := &unstructured.Unstructured{}
+	unstructuredCRD := &UnstructuredCRDHub{}
 	unstructuredCRD.SetGroupVersionKind(rrGVK)
+	scheme.Scheme.AddKnownTypeWithName(rrGVK, unstructuredCRD)
+	if err := (unstructuredCRD).SetupWebhookWithManager(r.Manager); err != nil {
+		logger.Error(err, "unable to create webhook", "webhook", "Promise")
+		os.Exit(1)
+	}
+
+	unstructuredCRD2 := &UnstructuredCRDConverter{}
+	kclient = r.Client
+	conversionPipelineImage = promise.Spec.ConversionPipeline
+	promiseIdentifier = promise.GetIdentifier()
+	unstructuredCRD2.SetGroupVersionKind(rrGVK2)
+
+	scheme.Scheme.AddKnownTypeWithName(rrGVK2, unstructuredCRD2)
+	if err := (unstructuredCRD2).SetupWebhookWithManager(r.Manager); err != nil {
+		logger.Error(err, "unable to create webhook", "webhook", "Promise")
+		os.Exit(1)
+	}
+
+	uCRD := &unstructured.Unstructured{}
+	uCRD.SetGroupVersionKind(rrGVK)
 
 	return ctrl.NewControllerManagedBy(r.Manager).
-		For(unstructuredCRD).
+		For(uCRD).
 		Complete(dynamicResourceRequestController)
 }
 
@@ -239,6 +261,11 @@ func (r *PromiseReconciler) createResourcesForDynamicController(ctx context.Cont
 			Labels: promise.GenerateSharedLabels(),
 		},
 		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"configmaps"},
+				Verbs:     []string{"get", "list", "update", "create", "patch", "delete", "watch"},
+			},
 			{
 				APIGroups: []string{rrGVK.Group},
 				Resources: []string{rrCRD.Spec.Names.Plural, rrCRD.Spec.Names.Plural + "/status"},
@@ -432,7 +459,7 @@ func (r *PromiseReconciler) deleteDynamicControllerResources(ctx context.Context
 }
 
 func (r *PromiseReconciler) deleteResourceRequests(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
-	_, rrGVK, err := generateCRDAndGVK(promise, logger)
+	_, rrGVK, _, err := generateCRDAndGVK(promise, logger)
 	if err != nil {
 		return err
 	}
@@ -524,14 +551,15 @@ func (r *PromiseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func generateCRDAndGVK(promise *v1alpha1.Promise, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, schema.GroupVersionKind, error) {
+func generateCRDAndGVK(promise *v1alpha1.Promise, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, schema.GroupVersionKind, schema.GroupVersionKind, error) {
 	rrCRD := &apiextensionsv1.CustomResourceDefinition{}
 	rrGVK := schema.GroupVersionKind{}
+	rrGVK2 := schema.GroupVersionKind{}
 
 	err := json.Unmarshal(promise.Spec.XaasCrd.Raw, rrCRD)
 	if err != nil {
 		logger.Error(err, "Failed unmarshalling CRD")
-		return rrCRD, rrGVK, err
+		return rrCRD, rrGVK, rrGVK2, err
 	}
 	rrCRD.Labels = labels.Merge(rrCRD.Labels, promise.GenerateSharedLabels())
 
@@ -543,7 +571,13 @@ func generateCRDAndGVK(promise *v1alpha1.Promise, logger logr.Logger) (*apiexten
 		Kind:    rrCRD.Spec.Names.Kind,
 	}
 
-	return rrCRD, rrGVK, nil
+	rrGVK2 = schema.GroupVersionKind{
+		Group:   rrCRD.Spec.Group,
+		Version: rrCRD.Spec.Versions[1].Name,
+		Kind:    rrCRD.Spec.Names.Kind,
+	}
+
+	return rrCRD, rrGVK, rrGVK2, nil
 }
 
 func setStatusFieldsOnCRD(rrCRD *apiextensionsv1.CustomResourceDefinition) {

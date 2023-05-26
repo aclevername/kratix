@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: conversion-pipelinebashexample-rr
+  namespace: default
+spec:
+  containers:
+  - command:
+    - sh
+    - -c
+    - write-configmap
+    image: syntassodev/kratix-platform-pipeline-adapter:dev
+    imagePullPolicy: IfNotPresent
+    name: write-configmap
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /output
+      name: vol0
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-z5hhh
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  initContainers:
+  - env:
+    - name: RESOURCE
+      value: |
+        {"apiVersion":"test.kratix.io/v1alpha1","kind":"bash","metadata":{"creationTimestamp":"2023-05-26T16:11:52Z","generation":1,"managedFields":[{"apiVersion":"test.kratix.io/v1alpha1","fieldsType":"FieldsV1","fieldsV1":{"f:metadata":{"f:annotations":{".":{},"f:kubectl.kubernetes.io/last-applied-configuration":{}}},"f:spec":{".":{},"f:container0Cmd":{},"f:container1Cmd":{}}},"manager":"kubectl-client-side-apply","operation":"Update","time":"2023-05-26T16:11:52Z"}],"name":"example-rr","namespace":"default","uid":"07a9cf85-532e-4c3b-80d5-637f21da5b10"},"spec":{"container0Cmd":"echo \"configmap: multi-container-config\" \u003e\u003e /input/container-0.txt\n","container1Cmd":"kubectl create configmap $(yq '.configmap' /input/container-0.txt) --dry-run=client -oyaml \u003e /output/configmap.yaml\n"}}
+    image: syntassodev/bash-promise-conversion:dev
+    imagePullPolicy: IfNotPresent
+    name: converter
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /output
+      name: vol0
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-z5hhh
+      readOnly: true
+  nodeName: platform-control-plane
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: OnFailure
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: bash-default-promise-pipeline
+  serviceAccountName: bash-default-promise-pipeline
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - emptyDir: {}
+    name: vol0
+  - name: kube-api-access-z5hhh
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace

@@ -24,6 +24,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
 	"fmt"
 	"strings"
@@ -377,4 +378,121 @@ func (r *dynamicResourceRequestController) pipelineInitContainers(rrID string, r
 	containers = append(containers, writer)
 
 	return containers, volumes
+}
+
+type UnstructuredCRDHub struct {
+	unstructured.Unstructured
+	version string
+}
+
+func (r *UnstructuredCRDHub) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewWebhookManagedBy(mgr).
+		For(r).
+		Complete()
+}
+
+func (*UnstructuredCRDHub) Hub() {}
+
+var converterlog = ctrl.Log.WithName("converter")
+
+type UnstructuredCRDConverter struct {
+	unstructured.Unstructured
+}
+
+var (
+	kclient                 client.Client
+	conversionPipelineImage string
+	promiseIdentifier       string
+)
+
+func (r *UnstructuredCRDConverter) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewWebhookManagedBy(mgr).
+		For(r).
+		Complete()
+}
+
+// ConvertTo converts this CronJob to the Hub version (v1).
+func (src *UnstructuredCRDConverter) ConvertTo(dstRaw conversion.Hub) error {
+	converterlog.Info("called to convertTo", "src", src, "dstRaw", dstRaw.GetObjectKind().GroupVersionKind())
+	return nil
+}
+
+func (dst *UnstructuredCRDConverter) ConvertFrom(srcRaw conversion.Hub) error {
+	converterlog.Info("called to convertFrom", "dst", dst, "srcRaw", srcRaw.GetObjectKind().GroupVersionKind())
+	src := srcRaw.(*UnstructuredCRDHub)
+	src.SetAnnotations(nil)
+	bytes, err := src.Unstructured.MarshalJSON()
+	if err != nil {
+		return err
+	}
+
+	converterlog.Info("obj", "obj", string(bytes))
+
+	pod := v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "conversion-pipeline" + src.GetKind() + src.GetName(),
+			Namespace: "default",
+		},
+		Spec: v1.PodSpec{
+			ServiceAccountName: promiseIdentifier + "-promise-pipeline",
+			RestartPolicy:      v1.RestartPolicyOnFailure,
+			Volumes: []v1.Volume{
+				{
+					Name: "vol0", VolumeSource: v1.VolumeSource{EmptyDir: &v1.EmptyDirVolumeSource{}},
+				},
+			},
+			InitContainers: []v1.Container{
+				{
+					Name:  "converter",
+					Image: conversionPipelineImage,
+					Env: []v1.EnvVar{
+						{Name: "RESOURCE", Value: string(bytes)},
+					},
+					VolumeMounts: []v1.VolumeMount{
+						{
+							MountPath: "/output",
+							Name:      "vol0",
+						},
+					},
+				},
+			},
+			Containers: []v1.Container{
+				{
+					Name:    "write-configmap",
+					Image:   os.Getenv("WC_IMG"),
+					Command: []string{"sh", "-c", "write-configmap"},
+					VolumeMounts: []v1.VolumeMount{
+						{
+							MountPath: "/output",
+							Name:      "vol0",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err = kclient.Create(context.TODO(), &pod)
+	if err != nil {
+		converterlog.Error(err, "Error creating Pod")
+		y, _ := yaml.Marshal(&pod)
+		converterlog.Error(err, string(y))
+	}
+
+	converterlog.Info("waiting for pod to complete")
+	time.Sleep(6 * time.Second)
+	converterlog.Info("pod complete")
+	configMap := &v1.ConfigMap{}
+	kclient.Get(context.TODO(), client.ObjectKey{Name: "configmap-test", Namespace: "default"}, configMap)
+	newResource := configMap.Data["resource"]
+	us := &unstructured.Unstructured{}
+	err = yaml.Unmarshal([]byte(newResource), us)
+	if err != nil {
+		converterlog.Error(err, string(newResource))
+	}
+	dst.Unstructured.Object["metadata"] = src.Object["metadata"]
+	dst.Unstructured.Object["spec"] = us.Object["spec"]
+
+	converterlog.Info("newobj", "dst", dst.Object)
+	return nil
 }

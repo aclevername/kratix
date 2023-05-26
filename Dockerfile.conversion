@@ -1,0 +1,11 @@
+FROM "alpine"
+
+RUN apk update && apk add --no-cache yq curl
+
+RUN curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.25.1/bin/linux/amd64/kubectl
+RUN chmod u+x kubectl && mv kubectl /bin/kubectl
+
+COPY convert-resource /bin/convert-resource
+
+CMD [ "sh", "-c", "./bin/convert-resource" ]
+ENTRYPOINT []

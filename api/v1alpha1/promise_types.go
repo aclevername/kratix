@@ -17,9 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
+	"github.com/syntasso/kratix/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -121,4 +125,25 @@ type PromiseList struct {
 
 func init() {
 	SchemeBuilder.Register(&Promise{}, &PromiseList{})
+}
+
+// v1                      v2
+func (src *Promise) ConvertTo(dstRaw conversion.Hub) error {
+	//update dstRaw to have the fields
+
+	dst := dstRaw.(*v1beta1.Promise)
+
+	dst.Spec.Pipeline = src.Spec.XaasRequestPipeline
+	dst.Spec.XaasCrd = src.Spec.XaasCrd
+	//fix this and keep converting the resource
+	// - testing gitops drift detection with converison webhooks
+	dst.Spec.WorkerClusterResources = src.Spec.WorkerClusterResources
+	dst.Spec.ClusterSelector = src.Spec.ClusterSelector
+
+	return fmt.Errorf("converTo")
+}
+
+// v2                        v1
+func (dst *Promise) ConvertFrom(srcRaw conversion.Hub) error {
+	return fmt.Errorf("convertFrom")
 }

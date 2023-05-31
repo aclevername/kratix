@@ -42,7 +42,7 @@ var setupLog = ctrl.Log.WithName("setup")
 
 func init() {
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(platformv1beta1.AddToScheme(scheme))
+	utilruntime.Must(platformv1beta1.AddToScheme(scheme.Scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -115,6 +115,10 @@ func main() {
 		Log:    ctrl.Log.WithName("controllers").WithName("WorkPlacementController"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkPlacement")
+		os.Exit(1)
+	}
+	if err = (&platformv1beta1.Promise{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Promise")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

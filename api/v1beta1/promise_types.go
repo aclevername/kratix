@@ -18,6 +18,8 @@ package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -25,11 +27,38 @@ import (
 
 // PromiseSpec defines the desired state of Promise
 type PromiseSpec struct {
+
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of Promise. Edit promise_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// TODO: apiextemnsion.CustomResourceDefinitionSpec struct(s) don't have the required jsontags and
+	// cannot be used as a Type. See https://github.com/kubernetes-sigs/controller-tools/pull/528
+	// && https://github.com/kubernetes-sigs/controller-tools/issues/291
+	//
+	// OPA Validation pattern:
+	// https://github.com/open-policy-agent/frameworks/blob/1307ba72bce38ee3cf44f94def1bbc41eb4ffa90/constraint/pkg/apis/templates/v1beta1/constrainttemplate_types.go#L46
+	// XaasCrd runtime.RawExtension      `json:"xaasCrd,omitempty"`
+
+	// X's CustomResourceDefinition to create the X-aaS offering
+	//
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:EmbeddedResource
+	XaasCrd runtime.RawExtension `json:"xaasCrd,omitempty"`
+
+	// Array of Image tags to transform from input request custom resource to output resource(s)
+	Pipeline []string `json:"pipeline,omitempty"`
+
+	WorkerClusterResources []WorkerClusterResource `json:"workerClusterResources,omitempty"`
+
+	ClusterSelector map[string]string `json:"clusterSelector,omitempty"`
+}
+
+// Resources represents the manifest workload to be deployed on worker cluster
+type WorkerClusterResource struct {
+	// Manifests represents a list of kubernetes resources to be deployed on the worker cluster.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	unstructured.Unstructured `json:",inline"`
 }
 
 // PromiseStatus defines the observed state of Promise
@@ -40,6 +69,7 @@ type PromiseStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:storageversion
 
 // Promise is the Schema for the promises API
 type Promise struct {
@@ -48,6 +78,39 @@ type Promise struct {
 
 	Spec   PromiseSpec   `json:"spec,omitempty"`
 	Status PromiseStatus `json:"status,omitempty"`
+}
+
+func (*Promise) Hub() {}
+
+func (p *Promise) DoesNotContainXAASCrd() bool {
+	// if a request pipeline is set but there is not a CRD the pipeline is ignored
+	// TODO how can we prevent this scenario from happening
+	return p.Spec.XaasCrd.Raw == nil
+}
+
+func (p *Promise) GenerateSharedLabels() map[string]string {
+	return map[string]string{
+		"kratix-promise-id": p.GetIdentifier(),
+	}
+}
+func (p *Promise) GetIdentifier() string {
+	return p.GetName() + "-" + p.GetNamespace()
+}
+
+func (p *Promise) GetControllerResourceName() string {
+	return p.GetIdentifier() + "-promise-controller"
+}
+
+func (p *Promise) GetPipelineResourceName() string {
+	return p.GetIdentifier() + "-promise-pipeline"
+}
+
+func (p *Promise) GetConfigMapName() string {
+	return "cluster-selectors-" + p.GetIdentifier()
+}
+
+func (p *Promise) GetPipelineResourceNamespace() string {
+	return "default"
 }
 
 //+kubebuilder:object:root=true

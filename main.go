@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
+	platformv1beta1 "github.com/syntasso/kratix/api/v1beta1"
 	"github.com/syntasso/kratix/controllers"
 	//+kubebuilder:scaffold:imports
 )
@@ -41,6 +42,7 @@ var setupLog = ctrl.Log.WithName("setup")
 
 func init() {
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(platformv1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

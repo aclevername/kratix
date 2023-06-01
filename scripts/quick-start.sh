@@ -297,6 +297,10 @@ install_kratix() {
         exit 1
     fi
 
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+    sleep 15
+    kubectl wait --for=condition=Ready --timeout=120s -n cert-manager pod -l app.kubernetes.io/instance=cert-manager
+
     if ${BUILD_KRATIX_IMAGES}; then
         build_and_load_local_images
     fi

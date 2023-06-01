@@ -17,12 +17,11 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-
 	"github.com/syntasso/kratix/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
 
@@ -127,23 +126,53 @@ func init() {
 	SchemeBuilder.Register(&Promise{}, &PromiseList{})
 }
 
+var logger = ctrl.Log.WithName("webhook")
+
 // v1                      v2
 func (src *Promise) ConvertTo(dstRaw conversion.Hub) error {
 	//update dstRaw to have the fields
 
 	dst := dstRaw.(*v1beta1.Promise)
+	logger.Info("converting object from v1alpha1 to v1beta1", "oldObj", src)
 
 	dst.Spec.Pipeline = src.Spec.XaasRequestPipeline
 	dst.Spec.XaasCrd = src.Spec.XaasCrd
 	//fix this and keep converting the resource
 	// - testing gitops drift detection with converison webhooks
-	dst.Spec.WorkerClusterResources = src.Spec.WorkerClusterResources
+	for _, wcr := range src.Spec.WorkerClusterResources {
+		dst.Spec.WorkerClusterResources = append(dst.Spec.WorkerClusterResources, v1beta1.WorkerClusterResource{Unstructured: wcr.Unstructured})
+	}
+
 	dst.Spec.ClusterSelector = src.Spec.ClusterSelector
 
-	return fmt.Errorf("converTo")
+	dst.ObjectMeta = src.ObjectMeta
+
+	logger.Info("conversion from v1alpha1 to v1beta1 complete", "newObj", src)
+	logger.Info("\n")
+
+	return nil
 }
 
 // v2                        v1
 func (dst *Promise) ConvertFrom(srcRaw conversion.Hub) error {
-	return fmt.Errorf("convertFrom")
+	src := srcRaw.(*v1beta1.Promise)
+	logger.Info("converting object from v1beta1 to v1alpha1", "oldObj", src)
+
+	dst.ObjectMeta = src.ObjectMeta
+
+	dst.Spec.XaasRequestPipeline = src.Spec.Pipeline
+	dst.Spec.XaasCrd = src.Spec.XaasCrd
+	//fix this and keep converting the resource
+	// - testing gitops drift detection with converison webhooks
+	for _, wcr := range src.Spec.WorkerClusterResources {
+		dst.Spec.WorkerClusterResources = append(dst.Spec.WorkerClusterResources, WorkerClusterResource{Unstructured: wcr.Unstructured})
+	}
+
+	dst.Spec.ClusterSelector = src.Spec.ClusterSelector
+
+	dst.ObjectMeta = src.ObjectMeta
+
+	logger.Info("conversion from v1beta1 to v1alpha1 complete", "newObj", src)
+	logger.Info("\n")
+	return nil
 }

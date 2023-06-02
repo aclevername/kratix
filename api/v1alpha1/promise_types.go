@@ -128,7 +128,7 @@ func init() {
 
 var logger = ctrl.Log.WithName("webhook")
 
-// v1                      v2
+// v1alpha1                      v1beta1
 func (src *Promise) ConvertTo(dstRaw conversion.Hub) error {
 	//update dstRaw to have the fields
 
@@ -153,7 +153,7 @@ func (src *Promise) ConvertTo(dstRaw conversion.Hub) error {
 	return nil
 }
 
-// v2                        v1
+// v1beta1                        v1alpha1
 func (dst *Promise) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*v1beta1.Promise)
 	logger.Info("converting object from v1beta1 to v1alpha1", "oldObj", src)

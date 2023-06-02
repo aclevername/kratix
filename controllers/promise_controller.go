@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/api/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -85,7 +86,7 @@ var (
 //+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch;delete
 
 func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	promise := &v1alpha1.Promise{}
+	promise := &v1beta1.Promise{}
 	err := r.Client.Get(ctx, req.NamespacedName, promise)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -139,14 +140,14 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, r.startDynamicController(promise, rrGVK)
 }
 
-func getDesiredFinalizers(promise *v1alpha1.Promise) []string {
+func getDesiredFinalizers(promise *v1beta1.Promise) []string {
 	if promise.DoesNotContainXAASCrd() {
 		return []string{workerClusterResourcesCleanupFinalizer}
 	}
 	return promiseFinalizers
 }
 
-func (r *PromiseReconciler) startDynamicController(promise *v1alpha1.Promise, rrGVK schema.GroupVersionKind) error {
+func (r *PromiseReconciler) startDynamicController(promise *v1beta1.Promise, rrGVK schema.GroupVersionKind) error {
 	//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
 	//once resolved, delete dynamic controller rather than disable
 	enabled := true
@@ -157,7 +158,7 @@ func (r *PromiseReconciler) startDynamicController(promise *v1alpha1.Promise, rr
 		gvk:                    &rrGVK,
 		promiseIdentifier:      promise.GetIdentifier(),
 		promiseClusterSelector: promise.Spec.ClusterSelector,
-		xaasRequestPipeline:    promise.Spec.XaasRequestPipeline,
+		xaasRequestPipeline:    promise.Spec.Pipeline,
 		log:                    r.Log,
 		uid:                    string(promise.GetUID())[0:5],
 		enabled:                &enabled,
@@ -171,7 +172,7 @@ func (r *PromiseReconciler) startDynamicController(promise *v1alpha1.Promise, rr
 		Complete(dynamicResourceRequestController)
 }
 
-func (r *PromiseReconciler) createResourcesForDynamicController(ctx context.Context, promise *v1alpha1.Promise,
+func (r *PromiseReconciler) createResourcesForDynamicController(ctx context.Context, promise *v1beta1.Promise,
 	rrCRD *apiextensionsv1.CustomResourceDefinition, rrGVK schema.GroupVersionKind, logger logr.Logger) error {
 
 	// CONTROLLER RBAC
@@ -338,7 +339,7 @@ func (r *PromiseReconciler) ensureCRDExists(ctx context.Context, rrCRD *apiexten
 	return err == nil
 }
 
-func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) (ctrl.Result, error) {
+func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) (ctrl.Result, error) {
 	if finalizersAreDeleted(promise, promiseFinalizers) {
 		return ctrl.Result{}, nil
 	}
@@ -399,7 +400,7 @@ func (r *PromiseReconciler) deletePromise(ctx context.Context, promise *v1alpha1
 
 // crb + cr + sa things we create for the pipeline
 // crb + cr attach to our existing service account
-func (r *PromiseReconciler) deleteDynamicControllerResources(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
+func (r *PromiseReconciler) deleteDynamicControllerResources(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) error {
 	var resourcesToDelete []schema.GroupVersionKind
 	resourcesToDelete = append(resourcesToDelete, schema.GroupVersionKind{
 		Group:   rbacv1.SchemeGroupVersion.Group,
@@ -434,7 +435,7 @@ func (r *PromiseReconciler) deleteDynamicControllerResources(ctx context.Context
 	return r.Client.Update(ctx, promise)
 }
 
-func (r *PromiseReconciler) deleteResourceRequests(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
+func (r *PromiseReconciler) deleteResourceRequests(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) error {
 	_, rrGVK, err := generateCRDAndGVK(promise, logger)
 	if err != nil {
 		return err
@@ -456,7 +457,7 @@ func (r *PromiseReconciler) deleteResourceRequests(ctx context.Context, promise 
 	return nil
 }
 
-func (r *PromiseReconciler) deleteConfigMap(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
+func (r *PromiseReconciler) deleteConfigMap(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) error {
 	gvk := schema.GroupVersionKind{
 		Group:   v1.SchemeGroupVersion.Group,
 		Version: v1.SchemeGroupVersion.Version,
@@ -476,7 +477,7 @@ func (r *PromiseReconciler) deleteConfigMap(ctx context.Context, promise *v1alph
 	return nil
 }
 
-func (r *PromiseReconciler) deleteCRDs(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
+func (r *PromiseReconciler) deleteCRDs(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) error {
 	crdGVK := schema.GroupVersionKind{
 		Group:   apiextensionsv1.SchemeGroupVersion.Group,
 		Version: apiextensionsv1.SchemeGroupVersion.Version,
@@ -498,7 +499,7 @@ func (r *PromiseReconciler) deleteCRDs(ctx context.Context, promise *v1alpha1.Pr
 	return nil
 }
 
-func (r *PromiseReconciler) deleteWork(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
+func (r *PromiseReconciler) deleteWork(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) error {
 	workGVK := schema.GroupVersionKind{
 		Group:   v1alpha1.GroupVersion.Group,
 		Version: v1alpha1.GroupVersion.Version,
@@ -523,11 +524,11 @@ func (r *PromiseReconciler) deleteWork(ctx context.Context, promise *v1alpha1.Pr
 // SetupWithManager sets up the controller with the Manager.
 func (r *PromiseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.Promise{}).
+		For(&v1beta1.Promise{}).
 		Complete(r)
 }
 
-func generateCRDAndGVK(promise *v1alpha1.Promise, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, schema.GroupVersionKind, error) {
+func generateCRDAndGVK(promise *v1beta1.Promise, logger logr.Logger) (*apiextensionsv1.CustomResourceDefinition, schema.GroupVersionKind, error) {
 	rrCRD := &apiextensionsv1.CustomResourceDefinition{}
 	rrGVK := schema.GroupVersionKind{}
 
@@ -599,7 +600,7 @@ func setStatusFieldsOnCRD(rrCRD *apiextensionsv1.CustomResourceDefinition) {
 	}
 }
 
-func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx context.Context, promise *v1alpha1.Promise, logger logr.Logger) error {
+func (r *PromiseReconciler) createWorkResourceForWorkerClusterResources(ctx context.Context, promise *v1beta1.Promise, logger logr.Logger) error {
 	workToCreate := &v1alpha1.Work{}
 	workToCreate.Spec.Replicas = v1alpha1.WorkerResourceReplicas
 	workToCreate.Name = promise.GetIdentifier()

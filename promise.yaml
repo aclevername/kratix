@@ -48,7 +48,7 @@ spec:
                 type: object
             type: object
         served: true
-        storage: false
+        storage: true
       - name: v1beta1
         schema:
           openAPIV3Schema:
@@ -69,7 +69,7 @@ spec:
                 type: object
             type: object
         served: true
-        storage: true
+        storage: false
   xaasRequestPipeline:
     - syntassodev/bash-promise-test-c0:dev
     - syntassodev/bash-promise-test-c1:dev

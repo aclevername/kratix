@@ -468,6 +468,7 @@ func conv(msg string, hub *UnstructuredCRDHub, spoke *UnstructuredCRDConverter) 
 					Image: conversionPipelineImage,
 					Env: []v1.EnvVar{
 						{Name: "RESOURCE", Value: string(bytes)},
+						{Name: "VERSION", Value: strings.Split(src.GetAPIVersion(), "/")[1]},
 					},
 					VolumeMounts: []v1.VolumeMount{
 						{
@@ -505,10 +506,15 @@ func conv(msg string, hub *UnstructuredCRDHub, spoke *UnstructuredCRDConverter) 
 	}
 
 	converterlog.Info("waiting for pod to complete")
-	time.Sleep(6 * time.Second)
-	converterlog.Info("pod complete")
 	configMap := &v1.ConfigMap{}
-	kclient.Get(context.TODO(), client.ObjectKey{Name: configMapName, Namespace: "default"}, configMap)
+	for {
+		err := kclient.Get(context.TODO(), client.ObjectKey{Name: configMapName, Namespace: "default"}, configMap)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond * 200)
+	}
+	converterlog.Info("pod complete")
 	newResource := configMap.Data["resource"]
 	us := &unstructured.Unstructured{}
 	err = yaml.Unmarshal([]byte(newResource), us)
@@ -527,5 +533,8 @@ func conv(msg string, hub *UnstructuredCRDHub, spoke *UnstructuredCRDConverter) 
 	}
 
 	converterlog.Info("newObj", "newObj", dst.Object)
+
+	kclient.Delete(context.TODO(), &pod)
+	kclient.Delete(context.TODO(), configMap)
 	return nil
 }

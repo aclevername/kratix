@@ -1,13 +1,14 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 set -euxo pipefail
 
 
 echo $RESOURCE > resource.yaml
 
-if grep -q v1alpha1 resource.yaml; then
+if [ $VERSION = "v1alpha1" ]; then
+	echo "converting from v1alpha to v1beta1"
 	container0="$(cat resource.yaml | yq .spec.container0Cmd)"
-	container1="$(cat resource.yaml | yq .spec.container1cmd)"
+	container1="$(cat resource.yaml | yq .spec.container1Cmd)"
 	name="$(cat resource.yaml | yq .metadata.name)"
 	namespace="$(cat resource.yaml | yq .metadata.namespace)"
 
@@ -18,14 +19,15 @@ if grep -q v1alpha1 resource.yaml; then
 apiVersion: test.kratix.io/v1beta1
 kind: bash
 metadata:
-	name: ${name}
-	namespace: ${namespace}
+  name: ${name}
+  namespace: ${namespace}
 spec:
-	container:
-		cmd0: ${container0}
-		cmd1: ${container1}
+  container:
+    cmd0: ${container0}
+    cmd1: ${container1}
 """ > /output/resource.yaml
 else
+	echo "converting from v1beta1 to v1alpha1"
 	container0="$(cat resource.yaml | yq .spec.container.cmd0)"
 	container1="$(cat resource.yaml | yq .spec.container.cmd1)"
 	name="$(cat resource.yaml | yq .metadata.name)"
@@ -38,10 +40,10 @@ else
 apiVersion: test.kratix.io/v1alpha1
 kind: bash
 metadata:
-	name: ${name}
-	namespace: ${namespace}
+  name: ${name}
+  namespace: ${namespace}
 spec:
-	container0Cmd: ${container0}
-	container1Cmd: ${container1}
+  container0Cmd: ${container0}
+  container1Cmd: ${container1}
 """ > /output/resource.yaml
 fi

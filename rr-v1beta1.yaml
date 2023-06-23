@@ -4,7 +4,5 @@ metadata:
   name: example-rr
 spec:
   container:
-    cmd0: |
-      echo "configmap: multi-container-config" >> /input/container-0.txt
-    cmd1: |
-      kubectl create configmap $(yq '.configmap' /input/container-0.txt) --dry-run=client -oyaml > /output/configmap.yaml
+    cmd0: foo
+    cmd1: bar

@@ -382,7 +382,6 @@ func (r *dynamicResourceRequestController) pipelineInitContainers(rrID string, r
 
 type UnstructuredCRDHub struct {
 	unstructured.Unstructured
-	version string
 }
 
 func (r *UnstructuredCRDHub) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -393,7 +392,7 @@ func (r *UnstructuredCRDHub) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 func (*UnstructuredCRDHub) Hub() {}
 
-var converterlog = ctrl.Log.WithName("converter")
+var mainlog = ctrl.Log.WithName("converter")
 
 type UnstructuredCRDConverter struct {
 	unstructured.Unstructured
@@ -413,24 +412,46 @@ func (r *UnstructuredCRDConverter) SetupWebhookWithManager(mgr ctrl.Manager) err
 
 // ConvertTo converts this CronJob to the Hub version (v1).
 func (src *UnstructuredCRDConverter) ConvertTo(dstRaw conversion.Hub) error {
-	converterlog.Info("called to convertTo", "src", src, "dstRaw", dstRaw.GetObjectKind().GroupVersionKind())
+	dst := dstRaw.(*UnstructuredCRDHub)
+	src.SetAnnotations(nil)
+	return conv("convertto", dst, src)
 	return nil
 }
 
 func (dst *UnstructuredCRDConverter) ConvertFrom(srcRaw conversion.Hub) error {
-	converterlog.Info("called to convertFrom", "dst", dst, "srcRaw", srcRaw.GetObjectKind().GroupVersionKind())
 	src := srcRaw.(*UnstructuredCRDHub)
 	src.SetAnnotations(nil)
-	bytes, err := src.Unstructured.MarshalJSON()
-	if err != nil {
-		return err
-	}
+	return conv("convertfrom", src, dst)
+}
 
-	converterlog.Info("obj", "obj", string(bytes))
+func conv(msg string, hub *UnstructuredCRDHub, spoke *UnstructuredCRDConverter) error {
+	var bytes []byte
+	var err error
+	var src unstructured.Unstructured
+	var dst unstructured.Unstructured
+	if msg == "convertfrom" {
+		bytes, err = hub.Unstructured.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		src = hub.Unstructured
+		dst = spoke.Unstructured
+	} else {
+		bytes, err = spoke.Unstructured.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		src = spoke.Unstructured
+		dst = hub.Unstructured
+	}
+	configMapName := fmt.Sprintf("%s-%s-%s", src.GetName(), strings.Split(src.GetAPIVersion(), "/")[1], uuid.NewUUID()[0:4])
+	converterlog := mainlog.WithValues("msg", msg, "key", configMapName)
+
+	converterlog.Info("originalObj", "originalObj", string(bytes))
 
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "conversion-pipeline" + src.GetKind() + src.GetName(),
+			Name:      configMapName,
 			Namespace: "default",
 		},
 		Spec: v1.PodSpec{
@@ -458,8 +479,11 @@ func (dst *UnstructuredCRDConverter) ConvertFrom(srcRaw conversion.Hub) error {
 			},
 			Containers: []v1.Container{
 				{
-					Name:    "write-configmap",
-					Image:   os.Getenv("WC_IMG"),
+					Name:  "write-configmap",
+					Image: os.Getenv("WC_IMG"),
+					Env: []v1.EnvVar{
+						{Name: "CONFIGMAP", Value: configMapName},
+					},
 					Command: []string{"sh", "-c", "write-configmap"},
 					VolumeMounts: []v1.VolumeMount{
 						{
@@ -477,22 +501,31 @@ func (dst *UnstructuredCRDConverter) ConvertFrom(srcRaw conversion.Hub) error {
 		converterlog.Error(err, "Error creating Pod")
 		y, _ := yaml.Marshal(&pod)
 		converterlog.Error(err, string(y))
+		return nil
 	}
 
 	converterlog.Info("waiting for pod to complete")
 	time.Sleep(6 * time.Second)
 	converterlog.Info("pod complete")
 	configMap := &v1.ConfigMap{}
-	kclient.Get(context.TODO(), client.ObjectKey{Name: "configmap-test", Namespace: "default"}, configMap)
+	kclient.Get(context.TODO(), client.ObjectKey{Name: configMapName, Namespace: "default"}, configMap)
 	newResource := configMap.Data["resource"]
 	us := &unstructured.Unstructured{}
 	err = yaml.Unmarshal([]byte(newResource), us)
 	if err != nil {
 		converterlog.Error(err, string(newResource))
+		return err
 	}
-	dst.Unstructured.Object["metadata"] = src.Object["metadata"]
-	dst.Unstructured.Object["spec"] = us.Object["spec"]
 
-	converterlog.Info("newobj", "dst", dst.Object)
+	dst.Object["metadata"] = src.Object["metadata"]
+	dst.Object["spec"] = us.Object["spec"]
+
+	if msg == "convertfrom" {
+		spoke.Unstructured = dst
+	} else {
+		hub.Unstructured = dst
+	}
+
+	converterlog.Info("newObj", "newObj", dst.Object)
 	return nil
 }

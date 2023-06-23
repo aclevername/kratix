@@ -3,4 +3,4 @@
 set -euxo pipefail
 
 
-kubectl create configmap configmap-test --from-file=resource=/output/resource.yaml
+kubectl create configmap ${CONFIGMAP} --from-file=resource=/output/resource.yaml

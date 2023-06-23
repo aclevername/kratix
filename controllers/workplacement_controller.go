@@ -92,7 +92,7 @@ func (r *WorkPlacementReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	paths := repoFilePaths{
 		Resources:     filepath.Join(workNamespacedName, "resources", "resources.yaml"),
 		CRDs:          filepath.Join(workNamespacedName, "crds", "crds.yaml"),
-		Kustomization: filepath.Join(workNamespacedName, "kustomization", fmt.Sprintf("%s.yaml", workNamespacedName)),
+		Kustomization: filepath.Join("resources", fmt.Sprintf("%s.yaml", workNamespacedName)),
 	}
 
 	writer, err := newWriter(ctx, r.Client, *cluster, logger)
@@ -164,11 +164,16 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 	}
 
 	kustomizationBuffer := bytes.NewBuffer([]byte{})
-	kustomizationWriter := json.YAMLFramer.NewFrameWriter(resourceBuffer)
+	kustomizationWriter := json.YAMLFramer.NewFrameWriter(kustomizationBuffer)
+
 	kustomizationResources := fluxv1beta2.Kustomization{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      work.GetName() + "-resources",
 			Namespace: "flux-system",
+		},
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "kustomize.toolkit.fluxcd.io/v1beta2",
+			Kind:       "Kustomization",
 		},
 		Spec: fluxv1beta2.KustomizationSpec{
 			Force:    false,
@@ -196,6 +201,10 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 			Name:      work.GetName() + "-crds",
 			Namespace: "flux-system",
 		},
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "kustomize.toolkit.fluxcd.io/v1beta2",
+			Kind:       "Kustomization",
+		},
 		Spec: fluxv1beta2.KustomizationSpec{
 			Force:    false,
 			Interval: metav1.Duration{Duration: time.Second * 5},
@@ -208,15 +217,14 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 			Validation: "client",
 		},
 	}
+
 	serializer.Encode(&kustomizationResources, kustomizationWriter)
 	serializer.Encode(&kustomizationCrds, kustomizationWriter)
-	if work.Spec.Kustomization {
-		err := writer.WriteObject(paths.Kustomization, kustomizationBuffer.Bytes())
-		if err != nil {
-			logger.Error(err, "Error writing kustomizations to repository")
-			return err
-		}
-		return nil
+
+	err := writer.WriteObject(paths.Kustomization, kustomizationBuffer.Bytes())
+	if err != nil {
+		logger.Error(err, "Error writing kustomizations to repository")
+		return err
 	}
 
 	// Upload CRDs to repository in separate files to other resources to ensure
@@ -224,7 +232,7 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 	// 00-crds files are applied before 01-resources by the Kustomise controller
 	// when it autogenerates its manifest.
 	// https://github.com/fluxcd/kustomize-controller/blob/main/docs/spec/v1beta1/kustomization.md#generate-kustomizationyaml
-	err := writer.WriteObject(paths.CRDs, crdBuffer.Bytes())
+	err = writer.WriteObject(paths.CRDs, crdBuffer.Bytes())
 	if err != nil {
 		logger.Error(err, "Error writing CRDS to repository")
 		return err

@@ -374,6 +374,8 @@ spec:
                 description: ClusterSelector is the selector to use for selecting
                   the worker cluster
                 type: object
+              kustomizaton:
+                type: boolean
               replicas:
                 description: -1 denotes Cluster Worker Resources, 1 denotes Resource
                   Request
@@ -724,7 +726,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  WC_IMG: syntasso/kratix-platform-pipeline-adapter:f0adcb5eb7317b9acb5fbbb7e91fce343d9a50d5
+  WC_IMG: syntasso/kratix-platform-pipeline-adapter:dev
 kind: ConfigMap
 metadata:
   name: kratix-platform-wc-img-config
@@ -785,7 +787,7 @@ spec:
             configMapKeyRef:
               key: WC_IMG
               name: kratix-platform-wc-img-config
-        image: syntasso/kratix-platform:f0adcb5eb7317b9acb5fbbb7e91fce343d9a50d5
+        image: syntasso/kratix-platform:dev
         livenessProbe:
           httpGet:
             path: /healthz

@@ -52,8 +52,6 @@ type WorkSpec struct {
 
 	// -1 denotes Cluster Worker Resources, 1 denotes Resource Request
 	Replicas int `json:"replicas,omitempty"`
-
-	Kustomization bool `json:"kustomizaton,omitempty"`
 }
 
 func (w *Work) IsResourceRequest() bool {

@@ -19,6 +19,9 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"path/filepath"
+	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -28,8 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	fluxv1beta2 "github.com/fluxcd/kustomize-controller/api/v1beta2"
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/writers"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // WorkPlacementReconciler reconciles a WorkPlacement object
@@ -43,8 +48,9 @@ const repoCleanupWorkPlacementFinalizer = "finalizers.workplacement.kratix.io/re
 var workPlacementFinalizers = []string{repoCleanupWorkPlacementFinalizer}
 
 type repoFilePaths struct {
-	Resources string
-	CRDs      string
+	Resources     string
+	CRDs          string
+	Kustomization string
 }
 
 //+kubebuilder:rbac:groups=platform.kratix.io,resources=workplacements,verbs=get;list;watch;create;update;patch;delete
@@ -83,8 +89,9 @@ func (r *WorkPlacementReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	workNamespacedName := workPlacement.Namespace + "-" + workPlacement.Spec.WorkName
 
 	paths := repoFilePaths{
-		Resources: "resources/01-" + workNamespacedName + "-resources.yaml",
-		CRDs:      "crds/00-" + workNamespacedName + "-crds.yaml",
+		Resources:     filepath.Join(workNamespacedName, "resources", "resources.yaml"),
+		CRDs:          filepath.Join(workNamespacedName, "crds", "crds.yaml"),
+		Kustomization: filepath.Join(workNamespacedName, "kustomization", fmt.Sprintf("%s.yaml", workNamespacedName)),
 	}
 
 	writer, err := newWriter(ctx, r.Client, *cluster, logger)
@@ -155,12 +162,67 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 		}
 	}
 
+	kustomizationBuffer := bytes.NewBuffer([]byte{})
+	kustomizationWriter := json.YAMLFramer.NewFrameWriter(resourceBuffer)
+	kustomizationResources := fluxv1beta2.Kustomization{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      work.GetName() + "-resources",
+			Namespace: "flux-system",
+		},
+		Spec: fluxv1beta2.KustomizationSpec{
+			Force:    false,
+			Interval: metav1.Duration{Duration: time.Second * 5},
+			Path:     filepath.Join(writer.GetDir(), paths.Resources),
+			Prune:    true,
+			SourceRef: fluxv1beta2.CrossNamespaceSourceReference{
+				Kind: sourcev1.GitRepositoryKind,
+				Name: "kratix-bucket",
+			},
+			Validation: "client",
+			// HealthChecks: []meta.NamespacedObjectKindReference{
+			// 	{
+			// 		APIVersion: "v1",
+			// 		Kind:       "ServiceAccount",
+			// 		Name:       id,
+			// 		Namespace:  id,
+			// 	},
+			// },
+		},
+	}
+
+	kustomizationCrds := fluxv1beta2.Kustomization{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      work.GetName() + "-crds",
+			Namespace: "flux-system",
+		},
+		Spec: fluxv1beta2.KustomizationSpec{
+			Force:    false,
+			Interval: metav1.Duration{Duration: time.Second * 5},
+			Path:     filepath.Join(writer.GetDir(), paths.CRDs),
+			Prune:    true,
+			SourceRef: fluxv1beta2.CrossNamespaceSourceReference{
+				Kind: sourcev1.GitRepositoryKind,
+				Name: "kratix-bucket",
+			},
+			Validation: "client",
+		},
+	}
+	serializer.Encode(&kustomizationResources, kustomizationWriter)
+	serializer.Encode(&kustomizationCrds, kustomizationWriter)
+	if work.Spec.Kustomization {
+		err := writer.WriteObject(paths.Kustomization, kustomizationBuffer.Bytes())
+		if err != nil {
+			logger.Error(err, "Error writing kustomizations to repository")
+			return err
+		}
+		return nil
+	}
+
 	// Upload CRDs to repository in separate files to other resources to ensure
 	// the APIs for resources exist before the resources are applied. The
 	// 00-crds files are applied before 01-resources by the Kustomise controller
 	// when it autogenerates its manifest.
 	// https://github.com/fluxcd/kustomize-controller/blob/main/docs/spec/v1beta1/kustomization.md#generate-kustomizationyaml
-
 	err := writer.WriteObject(paths.CRDs, crdBuffer.Bytes())
 	if err != nil {
 		logger.Error(err, "Error writing CRDS to repository")

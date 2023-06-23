@@ -133,6 +133,10 @@ func (g *GitWriter) WriteObject(fileName string, toWrite []byte) error {
 	return nil
 }
 
+func (g *GitWriter) GetDir() string {
+	return g.path
+}
+
 func (g *GitWriter) RemoveObject(fileName string) error {
 	log := g.Log.WithValues("dir", g.path, "fileName", fileName)
 

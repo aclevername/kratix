@@ -51,6 +51,10 @@ func NewS3Writer(logger logr.Logger, stateStoreSpec platformv1alpha1.BucketState
 	}, nil
 }
 
+func (b *S3Writer) GetDir() string {
+	return b.path
+}
+
 func (b *S3Writer) WriteObject(objectName string, toWrite []byte) error {
 	logger := b.Log.WithValues(
 		"bucketName", b.BucketName,

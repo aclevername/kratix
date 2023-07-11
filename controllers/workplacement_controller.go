@@ -27,15 +27,18 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/cli-utils/pkg/kstatus/status"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	fluxv1beta2 "github.com/fluxcd/kustomize-controller/api/v1beta2"
+	"github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/writers"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // WorkPlacementReconciler reconciles a WorkPlacement object
@@ -152,11 +155,16 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 
 	resourceBuffer := bytes.NewBuffer([]byte{})
 	resourceWriter := json.YAMLFramer.NewFrameWriter(resourceBuffer)
+	healthChecks := []meta.NamespacedObjectKindReference{}
 
 	for _, manifest := range work.Spec.Workload.Manifests {
 		// if manifest.GetKind() == "CustomResourceDefinition" {
 		// 	serializer.Encode(&manifest, crdWriter)
 		// } else {
+		healthCheck := r.computeHealthCheck(manifest.Unstructured)
+		if healthCheck != nil {
+			healthChecks = append(healthChecks, *healthCheck)
+		}
 		serializer.Encode(&manifest, resourceWriter)
 		// }
 	}
@@ -177,22 +185,15 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 		},
 		Spec: fluxv1beta2.KustomizationSpec{
 			Force:    false,
-			Interval: metav1.Duration{Duration: time.Second * 5},
+			Interval: metav1.Duration{Duration: time.Second * 30},
 			Path:     filepath.Dir(filepath.Join(writer.GetDir(), paths.Resources)),
 			Prune:    true,
 			SourceRef: fluxv1beta2.CrossNamespaceSourceReference{
 				Kind: sourcev1.BucketKind,
 				Name: "kratix-bucket",
 			},
-			Validation: "client",
-			// HealthChecks: []meta.NamespacedObjectKindReference{
-			// 	{
-			// 		APIVersion: "v1",
-			// 		Kind:       "ServiceAccount",
-			// 		Name:       id,
-			// 		Namespace:  id,
-			// 	},
-			// },
+			Validation:   "client",
+			HealthChecks: healthChecks,
 		},
 	}
 
@@ -215,6 +216,41 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 		return err
 	}
 
+	return nil
+}
+
+// SOURCE: https://github.com/kubernetes-sigs/cli-utils/blob/ed4ec48b3405206c6c2200adbbc9606ea46b4257/pkg/kstatus/status/core.go#L22C1-L39C2
+//
+// var legacyTypes = map[string]GetConditionsFn{
+// 	"Service":                    serviceConditions,
+// 	"Pod":                        podConditions,
+// 	"Secret":                     alwaysReady,
+// 	"PersistentVolumeClaim":      pvcConditions,
+// 	"apps/StatefulSet":           stsConditions,
+// 	"apps/DaemonSet":             daemonsetConditions,
+// 	"extensions/DaemonSet":       daemonsetConditions,
+// 	"apps/Deployment":            deploymentConditions,
+// 	"extensions/Deployment":      deploymentConditions,
+// 	"apps/ReplicaSet":            replicasetConditions,
+// 	"extensions/ReplicaSet":      replicasetConditions,
+// 	"policy/PodDisruptionBudget": pdbConditions,
+// 	"batch/CronJob":              alwaysReady,
+// 	"ConfigMap":                  alwaysReady,
+// 	"batch/Job":                  jobConditions,
+// 	"apiextensions.k8s.io/CustomResourceDefinition": crdConditions,
+// }
+
+func (r *WorkPlacementReconciler) computeHealthCheck(us unstructured.Unstructured) *meta.NamespacedObjectKindReference {
+	// GetLegacyConditionsFn returns a function that can compute the status for the
+	// given resource, or nil if the resource type is not known.
+	if fn := status.GetLegacyConditionsFn(&us); fn != nil {
+		return &meta.NamespacedObjectKindReference{
+			APIVersion: us.GetAPIVersion(),
+			Kind:       us.GetKind(),
+			Name:       us.GetName(),
+			Namespace:  us.GetNamespace(),
+		}
+	}
 	return nil
 }
 

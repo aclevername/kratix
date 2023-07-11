@@ -95,6 +95,8 @@ func (r *WorkPlacementReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Kustomization: filepath.Join("resources", fmt.Sprintf("%s.yaml", workNamespacedName)),
 	}
 
+	logger.Info("paths", "paths", paths)
+
 	writer, err := newWriter(ctx, r.Client, *cluster, logger)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -166,9 +168,11 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 	kustomizationBuffer := bytes.NewBuffer([]byte{})
 	kustomizationWriter := json.YAMLFramer.NewFrameWriter(kustomizationBuffer)
 
+	logger.Info("creating kustomization", "name", "kustomization-"+work.GetName()+"-resources", "dir", writer.GetDir())
+
 	kustomizationResources := fluxv1beta2.Kustomization{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      work.GetName() + "-resources",
+			Name:      "kustomization-" + work.GetName() + "-resources",
 			Namespace: "flux-system",
 		},
 		TypeMeta: metav1.TypeMeta{
@@ -178,10 +182,10 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 		Spec: fluxv1beta2.KustomizationSpec{
 			Force:    false,
 			Interval: metav1.Duration{Duration: time.Second * 5},
-			Path:     filepath.Join(writer.GetDir(), paths.Resources),
+			Path:     filepath.Dir(filepath.Join(writer.GetDir(), paths.Resources)),
 			Prune:    true,
 			SourceRef: fluxv1beta2.CrossNamespaceSourceReference{
-				Kind: sourcev1.GitRepositoryKind,
+				Kind: sourcev1.BucketKind,
 				Name: "kratix-bucket",
 			},
 			Validation: "client",
@@ -198,7 +202,7 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 
 	kustomizationCrds := fluxv1beta2.Kustomization{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      work.GetName() + "-crds",
+			Name:      "kustomization-" + work.GetName() + "-crds",
 			Namespace: "flux-system",
 		},
 		TypeMeta: metav1.TypeMeta{
@@ -208,10 +212,10 @@ func (r *WorkPlacementReconciler) writeWorkToRepository(writer writers.StateStor
 		Spec: fluxv1beta2.KustomizationSpec{
 			Force:    false,
 			Interval: metav1.Duration{Duration: time.Second * 5},
-			Path:     filepath.Join(writer.GetDir(), paths.CRDs),
+			Path:     filepath.Dir(filepath.Join(writer.GetDir(), paths.CRDs)),
 			Prune:    true,
 			SourceRef: fluxv1beta2.CrossNamespaceSourceReference{
-				Kind: sourcev1.GitRepositoryKind,
+				Kind: sourcev1.BucketKind,
 				Name: "kratix-bucket",
 			},
 			Validation: "client",

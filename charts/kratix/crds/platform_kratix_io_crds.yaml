@@ -325,8 +325,6 @@ spec:
                     type: string
                   description: ClusterSelector is the selector to use for selecting the worker cluster
                   type: object
-                kustomizaton:
-                  type: boolean
                 replicas:
                   description: -1 denotes Cluster Worker Resources, 1 denotes Resource Request
                   type: integer

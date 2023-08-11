@@ -398,13 +398,13 @@ func (r *PromiseReconciler) generateBackstageTemplateWithoutProperties(rrCRD *ap
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  description: %[1]s as a Service
+  description: %[2]s as a Service
   name: %[1]s-promise-template
   tags:
   - syntasso
   - kratix
   - experimental
-  title: %[1]s
+  title: %[2]s
 spec:
   lifecycle: experimental
   owner: kratix-platform
@@ -415,7 +415,7 @@ spec:
       manifest: ""
       namespaced: true
     name: Create a %[1]s
-  type: service`, rrCRD.Spec.Names.Kind))
+  type: service`, rrCRD.Spec.Names.Kind, strings.Title(rrCRD.Spec.Names.Kind)))
 
 	template := Template{}
 	err := yamlsig.Unmarshal(baseTemplate, &template)
@@ -438,7 +438,7 @@ metadata:
     title: Support
     url: https://github.com/syntasso/kratix-backstage
   name: %[1]s
-  title: %[1]s Promise
+  title: %[2]s Promise
 spec:
   dependsOn:
   - component:default/kratix
@@ -447,7 +447,7 @@ spec:
   providesApis:
   - %[1]s-promise-api
   type: promise
-`, rrCRD.Spec.Names.Kind))
+`, rrCRD.Spec.Names.Kind, strings.Title(rrCRD.Spec.Names.Kind)))
 
 	componentUS := unstructured.Unstructured{}
 	err := yamlsig.Unmarshal(componentBytes, &componentUS)

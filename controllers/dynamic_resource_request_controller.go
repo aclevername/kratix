@@ -24,11 +24,13 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	yamlsig "sigs.k8s.io/yaml"
 
 	"fmt"
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/pipeline"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
@@ -154,7 +156,78 @@ func (r *dynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 
 	}
 
+	if err := r.createBackstage(rr); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *dynamicResourceRequestController) createBackstage(rr *unstructured.Unstructured) error {
+	promiseName := r.promiseIdentifier
+
+	componentBytes := []byte(fmt.Sprintf(`---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: %[1]s-%[2]s
+  title: "%[3]s %[2]s"
+  description: %[3]s created via %[3]s Promise
+  annotations:
+    backstage.io/kubernetes-label-selector: %[1]s-cr=%[2]s
+  links:
+  - url: https://github.com/syntasso/kratix-backstage
+    title: Support
+    icon: help
+spec:
+  type: service
+  lifecycle: production
+  owner: kratix-worker
+  dependsOn:
+    - component:default/%[1]s
+  providesApis:
+    - namespace-server-api
+`, promiseName, rr.GetName(), promiseName)) //TODO change last arg to be upper case
+
+	componentUS := unstructured.Unstructured{}
+	err := yamlsig.Unmarshal(componentBytes, &componentUS)
+	if err != nil {
+		panic(err)
+	}
+
+	work := v1alpha1.Work{}
+	work.Name = promiseName + "-" + rr.GetName() + "-backstage"
+	work.Namespace = rr.GetNamespace()
+	work.Spec.Replicas = v1alpha1.DependencyReplicas
+	work.Spec.Scheduling = v1alpha1.WorkScheduling{
+		Promise: []v1alpha1.SchedulingConfig{
+			{
+				Target: v1alpha1.Target{
+					MatchLabels: map[string]string{
+						"environment": "backstage",
+					},
+				},
+			},
+		},
+	}
+
+	manifests := &work.Spec.Workload.Manifests
+	for _, resource := range []unstructured.Unstructured{componentUS} {
+		manifest := platformv1alpha1.Manifest{
+			Unstructured: resource,
+		}
+		*manifests = append(*manifests, manifest)
+	}
+
+	err = r.Client.Create(context.Background(), &work)
+
+	if err != nil {
+		if errors.IsAlreadyExists(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *dynamicResourceRequestController) deleteResources(ctx context.Context, resourceRequest *unstructured.Unstructured, resourceRequestIdentifier string, logger logr.Logger) (ctrl.Result, error) {

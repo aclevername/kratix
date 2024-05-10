@@ -97,7 +97,84 @@ func NewConfigurePromise(
 	return resources, nil
 }
 
+func NewDestinationPipeline(
+	uWork *unstructured.Unstructured,
+	destination string,
+	p v1alpha1.Pipeline,
+	promiseIdentifier string,
+	logger logr.Logger,
+) ([]client.Object, error) {
+
+	pipelineResources := NewPipelineArgs(promiseIdentifier, "", p.Name, uWork.GetName(), v1alpha1.SystemNamespace)
+	pipelineResources.names["destination"] = "destination"
+	destinationSelectorsConfigMap, err := destinationSelectorsConfigMap(pipelineResources, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	objHash, err := hash.ComputeHashForResource(uWork)
+	if err != nil {
+		return nil, err
+	}
+
+	pipeline, err := ConfigurePipeline(uWork, objHash, p, pipelineResources, promiseIdentifier, true, logger)
+	if err != nil {
+		return nil, err
+	}
+	//Current:
+	//init:
+	//0: get work
+	//1: user
+	//2: work writer
+	//container:
+	//update status
+
+	//Desired:
+	//init:
+	//0: get work
+	//1: user
+	//container:
+	//workplacement writer
+
+	//remove just the last init container
+	initContainers := []v1.Container{}
+	count := len(pipeline.Spec.Template.Spec.InitContainers)
+	for i := range count {
+		if i == count-1 {
+			continue
+		}
+		initContainers = append(initContainers, pipeline.Spec.Template.Spec.InitContainers[i])
+	}
+	pipeline.Spec.Template.Spec.InitContainers = initContainers
+
+	//inject workplacement writer
+	pipeline.Spec.Template.Spec.Containers[0].Name = "workplacement-writer"
+	pipeline.Spec.Template.Spec.Containers[0].Command = []string{"sh", "-c", "create-workplacement"}
+	pipeline.Spec.Template.Spec.Containers[0].Env = append(
+		pipeline.Spec.Template.Spec.Containers[0].Env,
+		v1.EnvVar{
+			Name:  "DESTINATION_NAME",
+			Value: destination,
+		},
+	)
+
+	pipeline.Labels["kratix.io/work-type"] = "promise-destination"
+	pipeline.Labels["kratix.io/promise-name"] = uWork.GetName()
+	pipeline.Name = strings.Replace(pipeline.Name, "configure-", "destination-", 1)
+
+	resources := []client.Object{
+		serviceAccount(pipelineResources),
+		clusterRole(pipelineResources),
+		clusterRoleBinding(pipelineResources),
+		destinationSelectorsConfigMap,
+		pipeline,
+	}
+
+	return resources, nil
+}
+
 func ConfigurePipeline(obj *unstructured.Unstructured, objHash string, pipeline v1alpha1.Pipeline, pipelineArgs PipelineArgs, promiseName string, promiseWorkflow bool, logger logr.Logger) (*batchv1.Job, error) {
+
 	volumes := metadataAndSchedulingVolumes(pipelineArgs.ConfigMapName())
 
 	initContainers, pipelineVolumes := generateConfigurePipelineContainersAndVolumes(obj, pipeline, promiseName, promiseWorkflow, logger)

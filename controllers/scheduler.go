@@ -5,14 +5,21 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strconv"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/lib/pipeline"
+	"github.com/syntasso/kratix/lib/workflow"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -221,6 +228,66 @@ func (s *Scheduler) reconcileWorkloadGroup(workloadGroup v1alpha1.WorkloadGroup,
 	if len(targetDestinationMap) == 0 {
 		s.Log.Info("no Destinations can be selected for scheduling", "scheduling", destinationSelectors, "workloadGroupDirectory", workloadGroup.Directory, "workloadGroupID", workloadGroup.ID)
 		return unscheduledStatus, nil
+	}
+
+	//if it has destination pipeline, delegrate creation of workplacements to
+	//pipeline
+	//othres contiue as usual
+
+	//check if destination has an existing pipeline, if so no-op
+	//if not, create a new pipeline
+
+	promise := &v1alpha1.Promise{}
+	err = s.Client.Get(context.Background(), client.ObjectKey{Name: work.Spec.PromiseName}, promise)
+	if err != nil {
+		return "", err
+	}
+
+	if len(promise.Spec.Workflows.Promise.Destination) > 0 {
+		for _, dest := range targetDestinationNames {
+			pipelines, err := v1alpha1.GeneratePipeline(promise.Spec.Workflows.Promise.Destination, s.Log)
+			if err != nil {
+				return "", err
+			}
+
+			objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(work)
+			if err != nil {
+				return "", err
+			}
+
+			uWork := &unstructured.Unstructured{Object: objMap}
+
+			p, err := pipeline.NewDestinationPipeline(uWork, dest, pipelines[0], promise.Name, s.Log)
+			if err != nil {
+				return "", err
+			}
+
+			job := p[4].(*batchv1.Job)
+			job.Spec.Template.Spec.Containers[0].Env = append(job.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{
+				Name:  "IS_LAST_PIPELINE",
+				Value: strconv.FormatBool(true),
+			})
+
+			workflows := []workflow.Pipeline{
+				{
+					Job:                  job,
+					JobRequiredResources: p[0:4],
+					Name:                 pipelines[0].Name,
+				},
+			}
+
+			jobOpts := workflow.NewOpts(context.TODO(), s.Client, s.Log.WithName("destination-workflows"), uWork, workflows, "promise-destination")
+
+			requeue, err := reconcileConfigure(jobOpts)
+			if err != nil {
+				return "", err
+			}
+
+			if requeue {
+				return "", fmt.Errorf("requeue")
+			}
+		}
+		return "finished", nil
 	}
 
 	s.Log.Info("found available target Destinations", "work", work.GetName(), "destinations", targetDestinationNames)

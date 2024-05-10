@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -100,7 +102,7 @@ func (r *WorkPlacementReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return addFinalizers(opts, workPlacement, workPlacementFinalizers)
 	}
 
-	err = r.writeWorkloadsToStateStore(writer, *workPlacement, logger)
+	err = r.writeWorkloadsToStateStore(writer, *workPlacement, *destination, logger)
 	if err != nil {
 		logger.Error(err, "Error writing to repository, will try again in 5 seconds")
 		return defaultRequeue, err
@@ -129,8 +131,22 @@ func (r *WorkPlacementReconciler) deleteWorkPlacement(ctx context.Context, write
 	return fastRequeue, nil
 }
 
-func (r *WorkPlacementReconciler) writeWorkloadsToStateStore(writer writers.StateStoreWriter, workPlacement v1alpha1.WorkPlacement, logger logr.Logger) error {
-	err := writer.WriteDirWithObjects(writers.DeleteExistingContentsInDir, getDir(workPlacement), workPlacement.Spec.Workloads...)
+func (r *WorkPlacementReconciler) writeWorkloadsToStateStore(writer writers.StateStoreWriter, workPlacement v1alpha1.WorkPlacement, destination v1alpha1.Destination, logger logr.Logger) error {
+	var templatedWorkloads []v1alpha1.Workload
+	for _, workload := range workPlacement.Spec.Workloads {
+		// for each workload, replace the contents with the variables defined in the
+		// destination
+		templatedContent := workload.Content
+		for key, value := range destination.Spec.Variables {
+			templatedContent = strings.ReplaceAll(templatedContent, fmt.Sprintf("{{ .%s }}", key), value)
+		}
+		templatedWorkloads = append(templatedWorkloads, v1alpha1.Workload{
+			Filepath: workload.Filepath,
+			Content:  templatedContent,
+		})
+	}
+
+	err := writer.WriteDirWithObjects(writers.DeleteExistingContentsInDir, getDir(workPlacement), templatedWorkloads...)
 	if err != nil {
 		logger.Error(err, "Error writing resources to repository")
 		return err

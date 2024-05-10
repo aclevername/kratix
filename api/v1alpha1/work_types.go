@@ -31,9 +31,10 @@ const (
 	PipelineNameLabel = KratixPrefix + "pipeline-name"
 	WorkTypeLabel     = KratixPrefix + "work-type"
 
-	WorkTypePromise          = "promise"
-	WorkTypeResource         = "resource"
-	WorkTypeStaticDependency = "static-dependency"
+	WorkTypePromise            = "promise"
+	WorkTypePromiseDestination = "promise-destination"
+	WorkTypeResource           = "resource"
+	WorkTypeStaticDependency   = "static-dependency"
 )
 
 // WorkStatus defines the observed state of Work

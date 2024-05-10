@@ -96,6 +96,8 @@ func ReconcileConfigure(opts Opts) (bool, error) {
 		return false, err
 	}
 
+	opts.logger.Info("found existing jobs", "count", len(allJobs), "labels", l)
+
 	var pipelineIndex = 0
 	var mostRecentJob *batchv1.Job
 
@@ -125,6 +127,7 @@ func ReconcileConfigure(opts Opts) (bool, error) {
 	opts.logger = originalLogger.WithName(pipeline.Name)
 
 	if jobIsForPipeline(pipeline, mostRecentJob) {
+		opts.logger.Info("jobs is for pipeline")
 		if isRunning(mostRecentJob) {
 			opts.logger.Info("Job already inflight for Pipeline, waiting for it to complete", "job", mostRecentJob.Name, "pipeline", pipeline.Name)
 			return true, nil
@@ -146,6 +149,7 @@ func ReconcileConfigure(opts Opts) (bool, error) {
 
 		return false, nil
 	}
+	opts.logger.Info("jobs is not for pipeline")
 
 	// TODO this will suspend any job that is in flight (without checking if it's active)
 	// and the next pipeline will immediately be started - this may be okay, but is
@@ -163,6 +167,7 @@ func ReconcileConfigure(opts Opts) (bool, error) {
 		return true, nil
 	}
 
+	opts.logger.Info("end of func")
 	// TODO this will be very noisy - might want to slowRequeue?
 	opts.logger.Info("Reconciling pipeline", "pipeline", pipeline.Name)
 	return createConfigurePipeline(opts, pipelineIndex, pipeline)

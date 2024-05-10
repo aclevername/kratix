@@ -11,17 +11,18 @@ func NewPipelineArgs(promiseIdentifier, resourceRequestIdentifier, pName, name, 
 	}
 
 	names := map[string]string{
-		"configure-pipeline-name": pipelineName("configure", promiseIdentifier),
-		"delete-pipeline-name":    pipelineName("delete", promiseIdentifier),
-		"promise-id":              promiseIdentifier,
-		"service-account":         pipelineID,
-		"role":                    pipelineID,
-		"role-binding":            pipelineID,
-		"config-map":              "destination-selectors-" + promiseIdentifier,
-		"resource-request-id":     resourceRequestIdentifier,
-		"namespace":               namespace,
-		"pipeline-name":           pName,
-		"name":                    name,
+		"configure-pipeline-name":   pipelineName("configure", promiseIdentifier),
+		"delete-pipeline-name":      pipelineName("delete", promiseIdentifier),
+		"destination-pipeline-name": pipelineName("destination", promiseIdentifier),
+		"promise-id":                promiseIdentifier,
+		"service-account":           pipelineID,
+		"role":                      pipelineID,
+		"role-binding":              pipelineID,
+		"config-map":                "destination-selectors-" + promiseIdentifier,
+		"resource-request-id":       resourceRequestIdentifier,
+		"namespace":                 namespace,
+		"pipeline-name":             pName,
+		"name":                      name,
 	}
 
 	return PipelineArgs{
@@ -32,6 +33,9 @@ func NewPipelineArgs(promiseIdentifier, resourceRequestIdentifier, pName, name, 
 func (p PipelineArgs) ConfigurePipelineJobLabels(objHash string) pipelineLabels {
 	resourceRequestID := p.names["resource-request-id"]
 	if resourceRequestID == "" {
+		if val, ok := p.names["destination"]; ok && val == "destination" {
+			return LabelsForDestinationPromise(p.PromiseID(), p.PipelineName(), objHash)
+		}
 		return LabelsForConfigurePromise(p.PromiseID(), p.PipelineName(), objHash)
 	}
 	return LabelsForConfigureResource(resourceRequestID, p.Name(), p.PromiseID(), p.PipelineName(), objHash)

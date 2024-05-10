@@ -53,6 +53,14 @@ func LabelsForConfigurePromise(promiseID, pipelineName string, requestSHA ...str
 	return labels
 }
 
+func LabelsForDestinationPromise(promiseID, pipelineName string, requestSHA ...string) map[string]string {
+	labels := PromiseLabels(promiseID).WithWorkflow(v1alpha1.WorkflowTypePromise, v1alpha1.WorkflowActionDestination, pipelineName)
+	if len(requestSHA) > 0 {
+		return labels.WithRequestSHA(requestSHA[0])
+	}
+	return labels
+}
+
 func ResourceLabels(rrID, rrName, promiseID string) pipelineLabels {
 	return PromiseLabels(promiseID).WithResourceRequestID(rrID, rrName)
 }

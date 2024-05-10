@@ -57,7 +57,8 @@ type DestinationSpec struct {
 	// destinationSelectors. An empty label set on the work won't be scheduled
 	// to this destination, unless the destination label set is also empty
 	// +kubebuilder:validation:Optional
-	StrictMatchLabels bool `json:"strictMatchLabels,omitempty"`
+	StrictMatchLabels bool              `json:"strictMatchLabels,omitempty"`
+	Variables         map[string]string `json:"variables,omitempty"`
 }
 
 // DestinationStatus defines the observed state of Destination

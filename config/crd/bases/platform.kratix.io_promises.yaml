@@ -100,6 +100,11 @@ spec:
                           type: object
                         type: array
                         x-kubernetes-preserve-unknown-fields: true
+                      destination:
+                        items:
+                          type: object
+                        type: array
+                        x-kubernetes-preserve-unknown-fields: true
                     type: object
                   resource:
                     properties:
@@ -109,6 +114,11 @@ spec:
                         type: array
                         x-kubernetes-preserve-unknown-fields: true
                       delete:
+                        items:
+                          type: object
+                        type: array
+                        x-kubernetes-preserve-unknown-fields: true
+                      destination:
                         items:
                           type: object
                         type: array

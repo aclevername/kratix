@@ -82,6 +82,8 @@ type Workflows struct {
 
 type WorkflowTriggers struct {
 	// +kubebuilder:pruning:PreserveUnknownFields
+	Destination []unstructured.Unstructured `json:"destination,omitempty"`
+	// +kubebuilder:pruning:PreserveUnknownFields
 	Configure []unstructured.Unstructured `json:"configure,omitempty"`
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Delete []unstructured.Unstructured `json:"delete,omitempty"`
@@ -258,7 +260,7 @@ func (p *Promise) GeneratePipelines(logger logr.Logger) (PromisePipelines, error
 
 	var pipelines [][]Pipeline
 	for _, pipeline := range pipelineWorkflows {
-		p, err := generatePipeline(pipeline, logger)
+		p, err := GeneratePipeline(pipeline, logger)
 		if err != nil {
 			return PromisePipelines{}, err
 		}
@@ -273,7 +275,7 @@ func (p *Promise) GeneratePipelines(logger logr.Logger) (PromisePipelines, error
 	}, nil
 }
 
-func generatePipeline(pipelines []unstructured.Unstructured, logger logr.Logger) ([]Pipeline, error) {
+func GeneratePipeline(pipelines []unstructured.Unstructured, logger logr.Logger) ([]Pipeline, error) {
 	if len(pipelines) == 0 {
 		return nil, nil
 	}

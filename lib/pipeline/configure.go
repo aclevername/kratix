@@ -160,7 +160,7 @@ func NewDestinationPipeline(
 
 	pipeline.Labels["kratix.io/work-type"] = "promise-destination"
 	pipeline.Labels["kratix.io/promise-name"] = uWork.GetName()
-	pipeline.Name = strings.Replace(pipeline.Name, "configure-", "destination-", 1)
+	pipeline.Name = strings.Replace(pipeline.Name, "configure-", fmt.Sprintf("destination-%s-", destination), 1)
 
 	resources := []client.Object{
 		serviceAccount(pipelineResources),

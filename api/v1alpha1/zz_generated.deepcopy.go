@@ -22,6 +22,7 @@ package v1alpha1
 
 import (
 	"k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -440,6 +441,13 @@ func (in *PipelineSpec) DeepCopyInto(out *PipelineSpec) {
 	if in.Containers != nil {
 		in, out := &in.Containers, &out.Containers
 		*out = make([]Container, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.RBAC != nil {
+		in, out := &in.RBAC, &out.RBAC
+		*out = make([]rbacv1.PolicyRule, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

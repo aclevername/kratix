@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/resourceutil"
@@ -48,7 +49,7 @@ func serviceAccount(args PipelineArgs) *v1.ServiceAccount {
 func role(obj *unstructured.Unstructured, objPluralName string, args PipelineArgs) *rbacv1.Role {
 	return &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      args.RoleName(),
+			Name:      args.RoleBindingName(),
 			Labels:    args.Labels(),
 			Namespace: args.Namespace(),
 		},
@@ -211,6 +212,72 @@ func generateContainersAndVolumes(obj *unstructured.Unstructured, workflowType v
 	}
 
 	return containers, volumes
+}
+
+func generateRBAC(logger logr.Logger, args PipelineArgs, pipeline v1alpha1.Pipeline) ([]*rbacv1.ClusterRole, []*rbacv1.Role, []*rbacv1.RoleBinding) {
+	var clusterRoles []*rbacv1.ClusterRole
+	var roles []*rbacv1.Role
+	var roleBindings []*rbacv1.RoleBinding
+
+	for i, rbac := range pipeline.Spec.RBAC {
+
+		var roleBindingNamespace = args.Namespace()
+		policyRule := rbac
+		role := "Role"
+		for _, resource := range policyRule.Resources {
+			// if resource contains a slash, set ClusterRole to true
+			if strings.Contains(resource, "/") {
+				roleBindingNamespace = strings.Split(resource, "/")[0]
+			}
+		}
+
+		if roleBindingNamespace != args.Namespace() {
+			role = "ClusterRole"
+			clusterRoles = append(clusterRoles, &rbacv1.ClusterRole{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   args.RoleBindingName() + "-" + fmt.Sprint(i),
+					Labels: args.Labels(),
+				},
+				Rules: []rbacv1.PolicyRule{policyRule},
+			})
+
+		} else {
+			roles = append(roles, &rbacv1.Role{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      args.RoleBindingName() + "-" + fmt.Sprint(i),
+					Namespace: args.Namespace(),
+					Labels:    args.Labels(),
+				},
+				Rules: []rbacv1.PolicyRule{policyRule},
+			})
+		}
+
+		roleBindings = append(roleBindings, &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      args.RoleBindingName() + "-" + fmt.Sprint(i),
+				Namespace: roleBindingNamespace,
+				Labels:    args.Labels(),
+			},
+			RoleRef: rbacv1.RoleRef{
+				Kind:     role,
+				APIGroup: "rbac.authorization.k8s.io",
+				Name:     args.RoleName() + "-" + fmt.Sprint(i),
+			},
+			Subjects: []rbacv1.Subject{
+				{
+					Kind:      "ServiceAccount",
+					Namespace: args.Namespace(),
+					Name:      args.ServiceAccountName(),
+				},
+			},
+		})
+
+	}
+
+	logger.Info("clusterRoles", "clusterRoles", clusterRoles)
+	logger.Info("roles", "roles", roles)
+	logger.Info("roleBindings", "roleBindings", roleBindings)
+	return clusterRoles, roles, roleBindings
 }
 
 func pipelineName(promiseIdentifier, resourceIdentifier, objectName, pipelineName string) string {

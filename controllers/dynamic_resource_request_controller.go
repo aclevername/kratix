@@ -68,6 +68,7 @@ type DynamicResourceRequestController struct {
 }
 
 //+kubebuilder:rbac:groups="batch",resources=jobs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="rbac.authorization.k8s.io",resources=clusterroles;roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create
 
 func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -177,9 +178,10 @@ func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 
 		//TODO smelly, refactor. Should we merge the lib/pipeline package with lib/workflow?
 		//TODO if we dont do that, backfil unit tests for dynamic and promise controllers to assert the job is correct
+
 		pipelines = append(pipelines, workflow.Pipeline{
 			Job:                  job,
-			JobRequiredResources: pipelineResources[0:4],
+			JobRequiredResources: append(pipelineResources[0:4], pipelineResources[5:]...),
 			Name:                 p.Name,
 		})
 	}

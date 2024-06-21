@@ -18,12 +18,14 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // PipelineSpec defines the desired state of Pipeline
 type PipelineSpec struct {
 	Containers       []Container                   `json:"containers,omitempty"`
+	RBAC             []rbacv1.PolicyRule           `json:"rbac,omitempty"`
 	Volumes          []corev1.Volume               `json:"volumes,omitempty"`
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }

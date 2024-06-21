@@ -404,7 +404,7 @@ func (r *PromiseReconciler) reconcileDependencies(o opts, promise *v1alpha1.Prom
 		})
 		pipelines = append(pipelines, workflow.Pipeline{
 			Job:                  job,
-			JobRequiredResources: pipelineResources[0:4],
+			JobRequiredResources: append(pipelineResources[0:4], pipelineResources[5:]...),
 			Name:                 p.Name,
 		})
 	}

@@ -59,6 +59,18 @@ func NewConfigureResource(
 		job,
 	}
 
+	logger.Info("adding rbac")
+	clusterRoles, roles, roleBindings := generateRBAC(logger, pipelineResources, pipeline)
+	for _, cr := range clusterRoles {
+		resources = append(resources, cr)
+	}
+	for _, r := range roles {
+		resources = append(resources, r)
+	}
+	for _, rb := range roleBindings {
+		resources = append(resources, rb)
+	}
+
 	return resources, nil
 }
 
@@ -92,6 +104,17 @@ func NewConfigurePromise(
 		clusterRoleBinding(pipelineResources),
 		destinationSelectorsConfigMap,
 		pipeline,
+	}
+
+	clusterRoles, roles, roleBindings := generateRBAC(logger, pipelineResources, p)
+	for _, cr := range clusterRoles {
+		resources = append(resources, cr)
+	}
+	for _, r := range roles {
+		resources = append(resources, r)
+	}
+	for _, rb := range roleBindings {
+		resources = append(resources, rb)
 	}
 
 	return resources, nil

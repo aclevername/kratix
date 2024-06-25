@@ -54,6 +54,17 @@ spec:
                 - get
                 - list
                 - watch
+            - apiGroups:
+                - ""
+              resources:
+                - secrets
+              resourceNames:
+                - foo
+              resourceNamespace: kratix-platform-system
+              verbs:
+                - get
+                - list
+                - watch
             containers:
               - image: ghcr.io/syntasso/kratix-pipeline-utility:v0.0.1
                 name: rbac-test
@@ -61,5 +72,9 @@ spec:
                 args:
                   - -c
                   - |
-                    kubectl get secrets
+                    set -euo pipefail
+                    set +x
+                    kubectl get secrets -n default
+                    kubectl get secret foo -n kratix-platform-system
+                    kubectl get secrets -n gitea || true
                     kubectl get configmaps || true

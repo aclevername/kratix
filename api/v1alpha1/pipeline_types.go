@@ -25,9 +25,14 @@ import (
 // PipelineSpec defines the desired state of Pipeline
 type PipelineSpec struct {
 	Containers       []Container                   `json:"containers,omitempty"`
-	RBAC             []rbacv1.PolicyRule           `json:"rbac,omitempty"`
+	RBAC             []PolicyRule                  `json:"rbac,omitempty"`
 	Volumes          []corev1.Volume               `json:"volumes,omitempty"`
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+}
+
+type PolicyRule struct {
+	rbacv1.PolicyRule `json:",inline"`
+	ResourceNamespace string `json:"resourceNamespace,omitempty"`
 }
 
 type Container struct {

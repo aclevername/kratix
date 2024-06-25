@@ -60,9 +60,13 @@ func NewConfigureResource(
 	}
 
 	logger.Info("adding rbac")
-	clusterRoles, roles, roleBindings := generateRBAC(logger, pipelineResources, pipeline)
+	clusterRoles, clusterRoleBindings, roles, roleBindings := generateRBAC(logger, pipelineResources, pipeline)
 	for _, cr := range clusterRoles {
 		resources = append(resources, cr)
+	}
+
+	for _, crb := range clusterRoleBindings {
+		resources = append(resources, crb)
 	}
 	for _, r := range roles {
 		resources = append(resources, r)
@@ -106,9 +110,13 @@ func NewConfigurePromise(
 		pipeline,
 	}
 
-	clusterRoles, roles, roleBindings := generateRBAC(logger, pipelineResources, p)
+	clusterRoles, clusterRoleBindings, roles, roleBindings := generateRBAC(logger, pipelineResources, p)
 	for _, cr := range clusterRoles {
 		resources = append(resources, cr)
+	}
+
+	for _, crb := range clusterRoleBindings {
+		resources = append(resources, crb)
 	}
 	for _, r := range roles {
 		resources = append(resources, r)

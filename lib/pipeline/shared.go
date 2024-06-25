@@ -214,15 +214,17 @@ func generateContainersAndVolumes(obj *unstructured.Unstructured, workflowType v
 	return containers, volumes
 }
 
-func generateRBAC(logger logr.Logger, args PipelineArgs, pipeline v1alpha1.Pipeline) ([]*rbacv1.ClusterRole, []*rbacv1.Role, []*rbacv1.RoleBinding) {
+func generateRBAC(logger logr.Logger, args PipelineArgs, pipeline v1alpha1.Pipeline) ([]*rbacv1.ClusterRole, []*rbacv1.ClusterRoleBinding, []*rbacv1.Role, []*rbacv1.RoleBinding) {
 	var clusterRoles []*rbacv1.ClusterRole
+	var clusterRoleBindings []*rbacv1.ClusterRoleBinding
 	var roles []*rbacv1.Role
 	var roleBindings []*rbacv1.RoleBinding
 
 	for i, rbac := range pipeline.Spec.RBAC {
 
 		var roleBindingNamespace = args.Namespace()
-		policyRule := rbac
+
+		policyRule := rbac.PolicyRule
 		role := "Role"
 		for _, resource := range policyRule.Resources {
 			// if resource contains a slash, set ClusterRole to true
@@ -231,7 +233,11 @@ func generateRBAC(logger logr.Logger, args PipelineArgs, pipeline v1alpha1.Pipel
 			}
 		}
 
-		if roleBindingNamespace != args.Namespace() {
+		if rbac.ResourceNamespace != "" && rbac.ResourceNamespace != args.Namespace() {
+			roleBindingNamespace = rbac.ResourceNamespace
+			if roleBindingNamespace == "*" {
+				roleBindingNamespace = ""
+			}
 			role = "ClusterRole"
 			clusterRoles = append(clusterRoles, &rbacv1.ClusterRole{
 				ObjectMeta: metav1.ObjectMeta{
@@ -252,32 +258,53 @@ func generateRBAC(logger logr.Logger, args PipelineArgs, pipeline v1alpha1.Pipel
 			})
 		}
 
-		roleBindings = append(roleBindings, &rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      args.RoleBindingName() + "-" + fmt.Sprint(i),
-				Namespace: roleBindingNamespace,
-				Labels:    args.Labels(),
-			},
-			RoleRef: rbacv1.RoleRef{
-				Kind:     role,
-				APIGroup: "rbac.authorization.k8s.io",
-				Name:     args.RoleName() + "-" + fmt.Sprint(i),
-			},
-			Subjects: []rbacv1.Subject{
-				{
-					Kind:      "ServiceAccount",
-					Namespace: args.Namespace(),
-					Name:      args.ServiceAccountName(),
+		if roleBindingNamespace == "" {
+			clusterRoleBindings = append(clusterRoleBindings, &rbacv1.ClusterRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   args.RoleBindingName() + "-" + fmt.Sprint(i),
+					Labels: args.Labels(),
 				},
-			},
-		})
+				RoleRef: rbacv1.RoleRef{
+					Kind:     role,
+					APIGroup: "rbac.authorization.k8s.io",
+					Name:     args.RoleName() + "-" + fmt.Sprint(i),
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						Kind:      "ServiceAccount",
+						Namespace: args.Namespace(),
+						Name:      args.ServiceAccountName(),
+					},
+				},
+			})
+		} else {
+			roleBindings = append(roleBindings, &rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      args.RoleBindingName() + "-" + fmt.Sprint(i),
+					Namespace: roleBindingNamespace,
+					Labels:    args.Labels(),
+				},
+				RoleRef: rbacv1.RoleRef{
+					Kind:     role,
+					APIGroup: "rbac.authorization.k8s.io",
+					Name:     args.RoleName() + "-" + fmt.Sprint(i),
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						Kind:      "ServiceAccount",
+						Namespace: args.Namespace(),
+						Name:      args.ServiceAccountName(),
+					},
+				},
+			})
+		}
 
 	}
 
 	logger.Info("clusterRoles", "clusterRoles", clusterRoles)
 	logger.Info("roles", "roles", roles)
 	logger.Info("roleBindings", "roleBindings", roleBindings)
-	return clusterRoles, roles, roleBindings
+	return clusterRoles, clusterRoleBindings, roles, roleBindings
 }
 
 func pipelineName(promiseIdentifier, resourceIdentifier, objectName, pipelineName string) string {

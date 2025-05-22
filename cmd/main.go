@@ -54,6 +54,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/syntasso/kratix/api/v1alpha1"
+	platformkratixiov1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/fetchers"
 	//+kubebuilder:scaffold:imports
@@ -63,6 +64,7 @@ var setupLog = ctrl.Log.WithName("setup")
 
 func init() {
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(platformkratixiov1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -305,6 +307,13 @@ func main() {
 		}
 		if err = kratixWebhook.SetupBucketStateStoreWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "BucketStateStore")
+			os.Exit(1)
+		}
+		if err = (&controller.PipelineTriggerReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "PipelineTrigger")
 			os.Exit(1)
 		}
 		//+kubebuilder:scaffold:builder

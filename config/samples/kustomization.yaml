@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- platform.kratix.io_v1alpha1_pipelinetrigger.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

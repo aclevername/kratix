@@ -1,4 +1,4 @@
-apiVersion: platform.kratix.io.kratix.io/v1alpha1
+apiVersion: platform.kratix.io/v1alpha1
 kind: PipelineTrigger
 metadata:
   labels:

@@ -71,6 +71,7 @@ rules:
   - destinations
   - gitstatestores
   - healthrecords
+  - pipelinetriggers
   - promisereleases
   - promises
   - workplacements
@@ -90,6 +91,7 @@ rules:
   - destinations/finalizers
   - gitstatestores/finalizers
   - healthrecords/finalizers
+  - pipelinetriggers/finalizers
   - promisereleases/finalizers
   - promises/finalizers
   - workplacements/finalizers
@@ -103,6 +105,7 @@ rules:
   - destinations/status
   - gitstatestores/status
   - healthrecords/status
+  - pipelinetriggers/status
   - promisereleases/status
   - promises/status
   - workplacements/status

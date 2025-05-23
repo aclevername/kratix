@@ -20,6 +20,7 @@ import (
 	"github.com/syntasso/kratix/lib/compression"
 	"github.com/syntasso/kratix/lib/hash"
 	"github.com/syntasso/kratix/lib/resourceutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,6 +33,41 @@ type WorkCreator struct {
 }
 
 func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceName, workflowType, pipelineName string) error {
+	waitFile := filepath.Join(rootDirectory, "metadata", "wait")
+	if _, err := os.Stat(waitFile); err == nil {
+		content, err := os.ReadFile(waitFile)
+		//remove all new lines and whitespace
+		content = []byte(strings.TrimSpace(string(content)))
+		if err != nil {
+			return err
+		}
+		pipelineTrigger := &v1alpha1.PipelineTrigger{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      objectutil.GenerateObjectName(resourceName),
+				Namespace: namespace,
+				Labels: map[string]string{
+					"kratix.io/resource-name": resourceName,
+					"kratix.io/pipeline-name": pipelineName,
+					"kratix.io/group":         os.Getenv("KRATIX_OBJECT_GROUP"),
+					"kratix.io/version":       os.Getenv("KRATIX_OBJECT_VERSION"),
+					"kratix.io/kind":          os.Getenv("KRATIX_OBJECT_KIND"),
+					"kratix.io/uid":           string(content),
+				},
+			},
+			Spec: v1alpha1.PipelineTriggerSpec{
+				ResourceName:      resourceName,
+				ResourceNamespace: namespace,
+				APIVersion:        os.Getenv("KRATIX_OBJECT_GROUP") + "/" + os.Getenv("KRATIX_OBJECT_VERSION"),
+				Kind:              os.Getenv("KRATIX_OBJECT_KIND"),
+				NextPipeline:      pipelineName,
+				UID:               string(content),
+			},
+		}
+		if err := w.K8sClient.Create(context.Background(), pipelineTrigger); err != nil {
+			return err
+		}
+	}
+
 	identifier := fmt.Sprintf("%s-%s-%s", promiseName, resourceName, pipelineName)
 	if workflowType != string(v1alpha1.WorkflowTypeResource) {
 		identifier = fmt.Sprintf("%s-%s", promiseName, pipelineName)

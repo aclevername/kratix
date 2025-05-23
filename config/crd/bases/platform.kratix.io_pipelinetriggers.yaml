@@ -1,0 +1,72 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: pipelinetriggers.platform.kratix.io
+spec:
+  group: platform.kratix.io
+  names:
+    kind: PipelineTrigger
+    listKind: PipelineTriggerList
+    plural: pipelinetriggers
+    singular: pipelinetrigger
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: PipelineTrigger is the Schema for the pipelinetriggers API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PipelineTriggerSpec defines the desired state of PipelineTrigger.
+            properties:
+              apiVersion:
+                type: string
+              kind:
+                type: string
+              nextPipeline:
+                type: string
+              resourceName:
+                type: string
+              resourceNamespace:
+                type: string
+              triggered:
+                type: boolean
+              uid:
+                type: string
+            required:
+            - apiVersion
+            - kind
+            - nextPipeline
+            - resourceName
+            - resourceNamespace
+            - triggered
+            - uid
+            type: object
+          status:
+            description: PipelineTriggerStatus defines the observed state of PipelineTrigger.
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

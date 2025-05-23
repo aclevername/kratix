@@ -173,6 +173,40 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 	isManualReconciliation := isManualReconciliation(opts.parentObject.GetLabels())
 	opts.logger = originalLogger.WithName(pipeline.Name).WithValues("isManualReconciliation", isManualReconciliation)
 
+	opts.logger.Info("reconciling pipeline number", "pipelineIndex", pipelineIndex)
+	if pipelineIndex > 0 {
+		previousPipelineName := opts.Resources[pipelineIndex-1].Name
+
+		l := map[string]string{
+			"kratix.io/resource-name": opts.parentObject.GetName(),
+			"kratix.io/pipeline-name": previousPipelineName,
+			"kratix.io/group":         opts.parentObject.GroupVersionKind().Group,
+			"kratix.io/version":       opts.parentObject.GroupVersionKind().Version,
+			"kratix.io/kind":          opts.parentObject.GroupVersionKind().Kind,
+		}
+
+		opts.logger.Info("checking if pipeline trigger is triggered", "labels", l)
+
+		pipelineTriggerList := &v1alpha1.PipelineTriggerList{}
+		err = opts.client.List(opts.ctx, pipelineTriggerList, &client.ListOptions{
+			LabelSelector: labels.SelectorFromSet(l),
+			Namespace:     opts.parentObject.GetNamespace(),
+		})
+		if err != nil {
+			opts.logger.Error(err, "failed to list pipeline triggers")
+			return false, err
+		}
+		opts.logger.Info("found pipeline triggers", "pipelineTriggerList", pipelineTriggerList.Items)
+		if len(pipelineTriggerList.Items) > 0 {
+			trigger := pipelineTriggerList.Items[0]
+
+			if !trigger.Spec.Triggered {
+				opts.logger.Info("PipelineTrigger is not triggered, waiting until its triggered")
+				return false, nil
+			}
+		}
+	}
+
 	if jobIsForPipeline(pipeline, mostRecentJob) {
 		opts.logger.Info("checking if job is for pipeline", "job", mostRecentJob.Name, "pipeline", pipeline.Name)
 		if isRunning(mostRecentJob) {

@@ -202,7 +202,7 @@ func (p *PipelineFactory) readerContainer() corev1.Container {
 	}
 }
 
-func (p *PipelineFactory) workCreatorContainer() corev1.Container {
+func (p *PipelineFactory) workCreatorContainer(obj *unstructured.Unstructured) corev1.Container {
 	workCreatorCommand := "work-creator"
 
 	args := []string{
@@ -230,6 +230,15 @@ func (p *PipelineFactory) workCreatorContainer() corev1.Container {
 		},
 		SecurityContext: kratixSecurityContext,
 		ImagePullPolicy: DefaultImagePullPolicy,
+		Env: []corev1.EnvVar{
+			corev1.EnvVar{Name: KratixObjectKindEnvVar, Value: strings.ToLower(obj.GetKind())},
+			corev1.EnvVar{Name: KratixObjectGroupEnvVar, Value: obj.GroupVersionKind().Group},
+			corev1.EnvVar{Name: KratixObjectVersionEnvVar, Value: obj.GroupVersionKind().Version},
+			corev1.EnvVar{Name: KratixObjectNameEnvVar, Value: obj.GetName()},
+			corev1.EnvVar{Name: KratixObjectNamespaceEnvVar, Value: p.Namespace},
+			corev1.EnvVar{Name: KratixCrdPluralEnvVar, Value: p.CRDPlural},
+			corev1.EnvVar{Name: KratixClusterScopedEnvVar, Value: fmt.Sprintf("%t", p.ClusterScoped)},
+		},
 	}
 }
 
@@ -286,7 +295,7 @@ func (p *PipelineFactory) pipelineJob(schedulingConfigMap *corev1.ConfigMap, ser
 
 	readerContainer := p.readerContainer()
 	pipelineContainers, pipelineVolumes := p.pipelineContainers()
-	workCreatorContainer := p.workCreatorContainer()
+	workCreatorContainer := p.workCreatorContainer(obj)
 	statusWriterContainer := p.statusWriterContainer(obj, env)
 
 	volumes := append(p.defaultVolumes(schedulingConfigMap), pipelineVolumes...)
@@ -434,7 +443,7 @@ func (p *PipelineFactory) role() ([]rbacv1.Role, error) {
 				},
 				{
 					APIGroups: []string{GroupVersion.Group},
-					Resources: []string{"works"},
+					Resources: []string{"works", "pipelinetriggers"},
 					Verbs:     []string{"*"},
 				},
 			},

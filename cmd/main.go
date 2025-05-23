@@ -54,17 +54,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/syntasso/kratix/api/v1alpha1"
-	platformkratixiov1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/fetchers"
+
 	//+kubebuilder:scaffold:imports
+
+	"encoding/json"
+	"net/http"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 var setupLog = ctrl.Log.WithName("setup")
 
 func init() {
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(platformkratixiov1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -94,6 +98,73 @@ var probeAddr string
 var secureMetrics bool
 var pprofAddr string
 var enableLeaderElection bool
+
+type WebhookPayload struct {
+	UID       string `json:"uid"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Group     string `json:"group"`
+	Version   string `json:"version"`
+	Kind      string `json:"kind"`
+}
+
+func PipelineTriggerHandler(c client.Client, log logr.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload WebhookPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			log.Error(err, "failed to decode webhook payload")
+			return
+		}
+
+		log.Info("Received pipeline trigger webhook", "uid", payload.UID, "resource", payload.Name, "namespace", payload.Namespace, "gvk", schema.GroupVersionKind{
+			Group:   payload.Group,
+			Version: payload.Version,
+			Kind:    payload.Kind,
+		})
+
+		pipelineTriggerList := &v1alpha1.PipelineTriggerList{}
+		labels := labels.Set{
+			"kratix.io/resource-name": payload.Name,
+			"kratix.io/group":         payload.Group,
+			"kratix.io/version":       payload.Version,
+			"kratix.io/kind":          payload.Kind,
+			"kratix.io/uid":           payload.UID,
+		}
+
+		listOptions := &client.ListOptions{
+			Namespace:     payload.Namespace,
+			LabelSelector: labels.AsSelector(),
+		}
+
+		if err := c.List(context.Background(), pipelineTriggerList, listOptions); err != nil {
+			log.Error(err, "failed to list PipelineTrigger resources")
+			http.Error(w, "failed to list PipelineTrigger resources", http.StatusInternalServerError)
+			return
+		}
+		if len(pipelineTriggerList.Items) == 0 {
+			log.Info("No PipelineTrigger resources found for the given payload")
+			http.Error(w, "no PipelineTrigger resources found", http.StatusNotFound)
+			return
+		}
+		log.Info("Found PipelineTrigger resources", "count", len(pipelineTriggerList.Items))
+		trigger := pipelineTriggerList.Items[0]
+		log.Info("Found PipelineTrigger resource", "name", trigger.Name, "namespace", trigger.Namespace)
+		trigger.Spec.Triggered = true
+
+		if err := c.Update(context.Background(), &trigger); err != nil {
+			log.Error(err, "failed to update PipelineTrigger resource")
+			http.Error(w, "failed to update PipelineTrigger resource", http.StatusInternalServerError)
+			return
+		}
+		log.Info("Updated PipelineTrigger resource", "name", trigger.Name, "namespace", trigger.Namespace)
+
+		// TODO: Add logic to find and patch the appropriate PipelineTrigger CR
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("trigger received"))
+	})
+}
 
 //nolint:funlen
 func main() {
@@ -194,6 +265,8 @@ func main() {
 			setupLog.Error(err, "unable to start manager")
 			os.Exit(1)
 		}
+
+		mgr.GetWebhookServer().Register("/trigger-pipeline", PipelineTriggerHandler(mgr.GetClient(), ctrl.Log.WithName("webhook")))
 
 		scheduler := controller.Scheduler{
 			Client: mgr.GetClient(),

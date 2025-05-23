@@ -25,11 +25,13 @@ import (
 
 // PipelineTriggerSpec defines the desired state of PipelineTrigger.
 type PipelineTriggerSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of PipelineTrigger. Edit pipelinetrigger_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	ResourceName      string `json:"resourceName"`
+	ResourceNamespace string `json:"resourceNamespace"`
+	APIVersion        string `json:"apiVersion"`
+	Kind              string `json:"kind"`
+	NextPipeline      string `json:"nextPipeline"`
+	UID               string `json:"uid"`
+	Triggered         bool   `json:"triggered"`
 }
 
 // PipelineTriggerStatus defines the observed state of PipelineTrigger.

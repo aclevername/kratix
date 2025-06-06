@@ -329,6 +329,16 @@ func main() {
 			setupLog.Error(err, "unable to create controller", "controller", "WorkPlacement")
 			os.Exit(1)
 		}
+
+		if err = (&controller.CompoundPromiseReconciler{
+			Client:              mgr.GetClient(),
+			ApiextensionsClient: apiextensionsClient.ApiextensionsV1(),
+			Log:                 ctrl.Log.WithName("controllers").WithName("CompoundPromiseController"),
+			VersionCache:        make(map[string]string),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "CompoundPromise")
+			os.Exit(1)
+		}
 		if err = kratixWebhook.SetupPromiseWebhookWithManager(mgr, apiextensionsClient, mgr.GetClient()); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Promise")
 			os.Exit(1)

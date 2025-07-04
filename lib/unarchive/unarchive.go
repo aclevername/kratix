@@ -2,66 +2,108 @@ package unarchive
 
 import (
 	"archive/tar"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/google/go-containerregistry/pkg/crane"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/memory"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 func Unarchive(imageRef string) (string, error) {
+	ctx := context.Background()
+
+	username := os.Getenv("OCI_USERNAME")
+	password := os.Getenv("OCI_PASSWORD")
+	if username == "" || password == "" {
+		return "", fmt.Errorf("OCI_USERNAME and OCI_PASSWORD must be set")
+	}
+
 	tempDir, err := os.MkdirTemp("", "oci-unarchive-")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
-	img, err := crane.Pull(imageRef)
+	repo, err := remote.NewRepository(imageRef)
+	if err != nil {
+		return "", fmt.Errorf("failed to create repo ref: %w", err)
+	}
+	repo.PlainHTTP = strings.HasPrefix(imageRef, "http://")
+	repo.Client = &auth.Client{
+		Client: retry.DefaultClient,
+		Credential: func(ctx context.Context, host string) (auth.Credential, error) {
+			return auth.Credential{
+				Username: username,
+				Password: password,
+			}, nil
+		},
+		Header: make(map[string][]string),
+	}
+
+	mem := memory.New()
+	tag := "latest"
+	manifestDesc, err := oras.Copy(ctx, repo, tag, mem, tag, oras.DefaultCopyOptions)
 	if err != nil {
 		return "", fmt.Errorf("failed to pull image: %w", err)
 	}
 
-	layers, err := img.Layers()
+	manifestReader, err := mem.Fetch(ctx, manifestDesc)
 	if err != nil {
-		return "", fmt.Errorf("failed to get image layers: %w", err)
+		return "", fmt.Errorf("failed to fetch manifest blob: %w", err)
+	}
+	defer manifestReader.Close()
+
+	manifestBlob, err := io.ReadAll(manifestReader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read manifest blob: %w", err)
 	}
 
-	for _, layer := range layers {
-		reader, err := layer.Uncompressed() // Get uncompressed contents of the layer
-		if err != nil {
-			return "", fmt.Errorf("failed to uncompress layer: %w", err)
-		}
-		defer reader.Close()
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(manifestBlob, &manifest); err != nil {
+		return "", fmt.Errorf("failed to unmarshal manifest: %w", err)
+	}
 
-		tarReader := tar.NewReader(reader)
+	for _, layer := range manifest.Layers {
+		layerReader, err := mem.Fetch(ctx, layer)
+		if err != nil {
+			return "", fmt.Errorf("failed to fetch layer: %w", err)
+		}
+		defer layerReader.Close()
+
+		tarReader := tar.NewReader(layerReader)
 		for {
-			header, err := tarReader.Next()
+			hdr, err := tarReader.Next()
 			if err == io.EOF {
-				break // End of archive
+				break
 			}
 			if err != nil {
-				return "", fmt.Errorf("failed to read tar header: %w", err)
+				return "", fmt.Errorf("tar read error: %w", err)
 			}
-
-			if header.Typeflag == tar.TypeDir {
+			if hdr.Typeflag == tar.TypeDir {
 				continue
 			}
-
-			filePath := filepath.Join(tempDir, header.Name)
-			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-				return "", fmt.Errorf("failed to create directory for file: %w", err)
+			outPath := filepath.Join(tempDir, hdr.Name)
+			if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+				return "", fmt.Errorf("mkdir error: %w", err)
 			}
-
-			file, err := os.Create(filePath)
+			file, err := os.Create(outPath)
 			if err != nil {
-				return "", fmt.Errorf("failed to create file: %w", err)
+				return "", fmt.Errorf("file create error: %w", err)
 			}
-			defer file.Close()
-
 			if _, err := io.Copy(file, tarReader); err != nil {
-				return "", fmt.Errorf("failed to write file content: %w", err)
+				file.Close()
+				return "", fmt.Errorf("file write error: %w", err)
 			}
+			file.Close()
 		}
 	}
 

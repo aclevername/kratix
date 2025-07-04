@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/syntasso/kratix/lib/oci"
 	"github.com/syntasso/kratix/lib/objectutil"
+	"github.com/syntasso/kratix/lib/oci"
 	"go.uber.org/zap/zapcore"
 
 	goerr "errors"
@@ -71,6 +71,7 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 
 			workloadDir := filepath.Join(pipelineOutputDir, directory)
 			imageRef := fmt.Sprintf("%s/%s-%s:%s", w.Registry, promiseName, resourceName, directory)
+			fmt.Println("Image reference for workload:", imageRef)
 			err := oci.Push(workloadDir, imageRef)
 			if err != nil {
 				return err

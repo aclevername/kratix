@@ -306,6 +306,40 @@ func (p *PipelineFactory) pipelineJob(schedulingConfigMap *corev1.ConfigMap, ser
 		containers = []corev1.Container{pipelineContainers[len(pipelineContainers)-1]}
 	}
 
+	initContainers[len(initContainers)-1].Env = append(initContainers[len(initContainers)-1].Env, corev1.EnvVar{
+		Name: "OCI_REGISTRY",
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				Key: "registry",
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: "registry",
+				},
+			},
+		},
+	},
+		corev1.EnvVar{
+			Name: "OCI_USERNAME",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					Key: "username",
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "registry",
+					},
+				},
+			},
+		},
+		corev1.EnvVar{
+			Name: "OCI_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					Key: "password",
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "registry",
+					},
+				},
+			},
+		})
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      p.pipelineJobName(),

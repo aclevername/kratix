@@ -269,7 +269,7 @@ func (s *Scheduler) updateWorkPlacement(workloadGroup v1alpha1.WorkloadGroup, wo
 		s.labelWorkplacementAsMisplaced(workPlacement)
 	}
 
-	workPlacement.Spec.Workloads = workloadGroup.Workloads
+	workPlacement.Spec.Image = workloadGroup.Image
 	if err := s.Client.Update(context.Background(), workPlacement); err != nil {
 		s.Log.Error(err, "Error updating WorkPlacement", "workplacement", workPlacement.Name)
 		return false, err
@@ -338,7 +338,7 @@ func (s *Scheduler) applyWorkplacementsForTargetDestinations(workloadGroup v1alp
 		workPlacement.Name = work.Name + "." + targetDestinationName + "-" + shortID(workloadGroup.ID)
 
 		op, err := controllerutil.CreateOrUpdate(context.Background(), s.Client, workPlacement, func() error {
-			workPlacement.Spec.Workloads = workloadGroup.Workloads
+			workPlacement.Spec.Image = workloadGroup.Image
 			workPlacement.Labels = map[string]string{
 				workLabelKey:               work.Name,
 				workloadGroupIDKey:         workloadGroup.ID,

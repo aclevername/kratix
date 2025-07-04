@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"sigs.k8s.io/yaml"
+	
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -162,56 +162,28 @@ func (r *DestinationReconciler) writeTestFiles(writer writers.StateStoreWriter, 
 }
 
 func (r *DestinationReconciler) createResourcePathWithExample(writer writers.StateStoreWriter, filePathMode string) error {
-	kratixConfigMap := &v1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ConfigMap",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kratix-info",
-			Namespace: "kratix-worker-system",
-		},
-		Data: map[string]string{
-			"canary": "this confirms your infrastructure is reading from Kratix state stores",
-		},
-	}
-	nsBytes, _ := yaml.Marshal(kratixConfigMap)
-
 	filePath := canaryConfigMapPath
 	if filePathMode == v1alpha1.FilepathModeNestedByMetadata {
 		filePath = filepath.Join(resourcesDir, filePath)
 	}
 
-	_, err := writer.UpdateFiles("", canaryWorkload, []v1alpha1.Workload{{
-		Filepath: filePath,
-		Content:  string(nsBytes)}}, nil)
+	_, err := writer.UpdateFiles("", canaryWorkload, "", nil)
 	return err
 }
 
 func (r *DestinationReconciler) createDependenciesPathWithExample(writer writers.StateStoreWriter, filePathMode string) error {
-	kratixNamespace := &v1.Namespace{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Namespace",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: "kratix-worker-system"},
-	}
-	nsBytes, _ := yaml.Marshal(kratixNamespace)
-
 	filePath := canaryNamespacePath
 	if filePathMode == v1alpha1.FilepathModeNestedByMetadata {
 		filePath = filepath.Join(dependenciesDir, filePath)
 	}
 
-	_, err := writer.UpdateFiles("", canaryWorkload, []v1alpha1.Workload{{
-		Filepath: filePath,
-		Content:  string(nsBytes)}}, nil)
+	_, err := writer.UpdateFiles("", canaryWorkload, "", nil)
 	return err
 }
 
 func (r *DestinationReconciler) deleteInitWorkloads(writer writers.StateStoreWriter) error {
 	filesToDelete := []string{canaryNamespacePath, canaryConfigMapPath}
-	if _, err := writer.UpdateFiles("", canaryWorkload, nil, filesToDelete); err != nil {
+	if _, err := writer.UpdateFiles("", canaryWorkload, "", filesToDelete); err != nil {
 		return fmt.Errorf("error deleting canary resources %v: %w", filesToDelete, err)
 	}
 	return nil
@@ -237,13 +209,13 @@ func (r *DestinationReconciler) deleteDestination(o opts, destination *v1alpha1.
 
 func (r *DestinationReconciler) deleteStateStoreContents(o opts, writer writers.StateStoreWriter) error {
 	o.logger.Info("removing dependencies dir from repository")
-	if _, err := writer.UpdateFiles(dependenciesDir, canaryWorkload, nil, nil); err != nil {
+	if _, err := writer.UpdateFiles(dependenciesDir, canaryWorkload, "", nil); err != nil {
 		o.logger.Error(err, "error removing dependencies dir from repository")
 		return err
 	}
 
 	o.logger.Info("removing resources dir from repository")
-	if _, err := writer.UpdateFiles(resourcesDir, canaryWorkload, nil, nil); err != nil {
+	if _, err := writer.UpdateFiles(resourcesDir, canaryWorkload, "", nil); err != nil {
 		o.logger.Error(err, "error removing resources dir from repository")
 		return err
 	}

@@ -17,9 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-
-	"github.com/syntasso/kratix/lib/compression"
 	"github.com/syntasso/kratix/lib/hash"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -84,26 +81,10 @@ func NewPromiseDependenciesWork(promise *Promise, name string) (*Work, error) {
 		},
 	}
 
-	yamlBytes, err := promise.Spec.Dependencies.Marshal()
-	if err != nil {
-		return nil, err
-	}
-
-	workContent, err := compression.CompressContent(yamlBytes)
-	if err != nil {
-		return nil, err
-	}
-
 	work.Spec.WorkloadGroups = []WorkloadGroup{
 		{
 			ID:        hash.ComputeHash(DefaultWorkloadGroupDirectory),
 			Directory: DefaultWorkloadGroupDirectory,
-			Workloads: []Workload{
-				{
-					Content:  string(workContent),
-					Filepath: fmt.Sprintf("static/%s-dependencies.yaml", promise.GetName()),
-				},
-			},
 		},
 	}
 
@@ -130,27 +111,22 @@ func (w *Work) IsDependency() bool {
 // WorkloadGroup represents the workloads in a particular directory that should
 // be scheduled to a Destination
 type WorkloadGroup struct {
-	// +optional
-	// List of Workloads scheduled to target Destination;
-	// Each Workload details name of the filepath on Destination,
-	// and the compressed content of the workload.
-	Workloads            []Workload                `json:"workloads,omitempty"`
 	Directory            string                    `json:"directory,omitempty"`
 	ID                   string                    `json:"id,omitempty"`
 	DestinationSelectors []WorkloadGroupScheduling `json:"destinationSelectors,omitempty"`
+	Image                string                    `json:"image,omitempty"`
 }
 
-type WorkloadGroupScheduling struct {
-	MatchLabels map[string]string `json:"matchLabels,omitempty"`
-	Source      string            `json:"source,omitempty"`
-}
-
-// Workload represents the manifest workload to be deployed on destination
 type Workload struct {
 	// +optional
 	Filepath string `json:"filepath,omitempty"`
 	// Content of the workload, which is base64 encoded and compressed with gzip.
 	Content string `json:"content,omitempty"`
+}
+
+type WorkloadGroupScheduling struct {
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
+	Source      string            `json:"source,omitempty"`
 }
 
 //+kubebuilder:object:root=true

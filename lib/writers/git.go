@@ -18,6 +18,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/lib/unarchive"
 )
 
 type GitWriter struct {
@@ -119,8 +120,48 @@ func NewGitWriter(logger logr.Logger, stateStoreSpec v1alpha1.GitStateStoreSpec,
 	}, nil
 }
 
-func (g *GitWriter) UpdateFiles(subDir string, workPlacementName string, workloadsToCreate []v1alpha1.Workload, workloadsToDelete []string) (string, error) {
+func (g *GitWriter) UpdateFiles(subDir string, workPlacementName string, image string, workloadsToDelete []string) (string, error) {
+	workloadsToCreate, err := g.getWorkloadsFromOCI(image)
+	if err != nil {
+		return "", err
+	}
 	return g.update(subDir, workPlacementName, workloadsToCreate, workloadsToDelete)
+}
+
+func (g *GitWriter) getWorkloadsFromOCI(image string) ([]v1alpha1.Workload, error) {
+	tempDir, err := unarchive.Unarchive(image)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tempDir)
+
+	var workloads []v1alpha1.Workload
+	err = filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			relPath, err := filepath.Rel(tempDir, path)
+			if err != nil {
+				return err
+			}
+			workloads = append(workloads, v1alpha1.Workload{
+				Filepath: relPath,
+				Content:  string(content),
+			})
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return workloads, nil
 }
 
 func (g *GitWriter) update(subDir, workPlacementName string, workloadsToCreate []v1alpha1.Workload, workloadsToDelete []string) (string, error) {

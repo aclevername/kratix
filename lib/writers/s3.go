@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/lib/unarchive"
 )
 
 const (
@@ -113,8 +115,48 @@ func (b *S3Writer) ReadFile(filename string) ([]byte, error) {
 
 }
 
-func (b *S3Writer) UpdateFiles(subDir string, _ string, workloadsToCreate []v1alpha1.Workload, workloadsToDelete []string) (string, error) {
-	return b.update(subDir, workloadsToCreate, workloadsToDelete)
+func (s *S3Writer) UpdateFiles(subDir string, workPlacementName string, image string, workloadsToDelete []string) (string, error) {
+	workloadsToCreate, err := s.getWorkloadsFromOCI(image)
+	if err != nil {
+		return "", err
+	}
+	return s.update(subDir, workloadsToCreate, workloadsToDelete)
+}
+
+func (s *S3Writer) getWorkloadsFromOCI(image string) ([]v1alpha1.Workload, error) {
+	tempDir, err := unarchive.Unarchive(image)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tempDir)
+
+	var workloads []v1alpha1.Workload
+	err = filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			relPath, err := filepath.Rel(tempDir, path)
+			if err != nil {
+				return err
+			}
+			workloads = append(workloads, v1alpha1.Workload{
+				Filepath: relPath,
+				Content:  string(content),
+			})
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return workloads, nil
 }
 
 func (b *S3Writer) update(subDir string, workloadsToCreate []v1alpha1.Workload, workloadsToDelete []string) (string, error) {

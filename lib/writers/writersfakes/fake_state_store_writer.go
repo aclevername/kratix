@@ -4,7 +4,6 @@ package writersfakes
 import (
 	"sync"
 
-	"github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/writers"
 )
 
@@ -22,12 +21,12 @@ type FakeStateStoreWriter struct {
 		result1 []byte
 		result2 error
 	}
-	UpdateFilesStub        func(string, string, []v1alpha1.Workload, []string) (string, error)
+	UpdateFilesStub        func(string, string, string, []string) (string, error)
 	updateFilesMutex       sync.RWMutex
 	updateFilesArgsForCall []struct {
 		arg1 string
 		arg2 string
-		arg3 []v1alpha1.Workload
+		arg3 string
 		arg4 []string
 	}
 	updateFilesReturns struct {
@@ -116,12 +115,7 @@ func (fake *FakeStateStoreWriter) ReadFileReturnsOnCall(i int, result1 []byte, r
 	}{result1, result2}
 }
 
-func (fake *FakeStateStoreWriter) UpdateFiles(arg1 string, arg2 string, arg3 []v1alpha1.Workload, arg4 []string) (string, error) {
-	var arg3Copy []v1alpha1.Workload
-	if arg3 != nil {
-		arg3Copy = make([]v1alpha1.Workload, len(arg3))
-		copy(arg3Copy, arg3)
-	}
+func (fake *FakeStateStoreWriter) UpdateFiles(arg1 string, arg2 string, arg3 string, arg4 []string) (string, error) {
 	var arg4Copy []string
 	if arg4 != nil {
 		arg4Copy = make([]string, len(arg4))
@@ -132,12 +126,12 @@ func (fake *FakeStateStoreWriter) UpdateFiles(arg1 string, arg2 string, arg3 []v
 	fake.updateFilesArgsForCall = append(fake.updateFilesArgsForCall, struct {
 		arg1 string
 		arg2 string
-		arg3 []v1alpha1.Workload
+		arg3 string
 		arg4 []string
-	}{arg1, arg2, arg3Copy, arg4Copy})
+	}{arg1, arg2, arg3, arg4Copy})
 	stub := fake.UpdateFilesStub
 	fakeReturns := fake.updateFilesReturns
-	fake.recordInvocation("UpdateFiles", []interface{}{arg1, arg2, arg3Copy, arg4Copy})
+	fake.recordInvocation("UpdateFiles", []interface{}{arg1, arg2, arg3, arg4Copy})
 	fake.updateFilesMutex.Unlock()
 	if stub != nil {
 		return stub(arg1, arg2, arg3, arg4)
@@ -154,13 +148,13 @@ func (fake *FakeStateStoreWriter) UpdateFilesCallCount() int {
 	return len(fake.updateFilesArgsForCall)
 }
 
-func (fake *FakeStateStoreWriter) UpdateFilesCalls(stub func(string, string, []v1alpha1.Workload, []string) (string, error)) {
+func (fake *FakeStateStoreWriter) UpdateFilesCalls(stub func(string, string, string, []string) (string, error)) {
 	fake.updateFilesMutex.Lock()
 	defer fake.updateFilesMutex.Unlock()
 	fake.UpdateFilesStub = stub
 }
 
-func (fake *FakeStateStoreWriter) UpdateFilesArgsForCall(i int) (string, string, []v1alpha1.Workload, []string) {
+func (fake *FakeStateStoreWriter) UpdateFilesArgsForCall(i int) (string, string, string, []string) {
 	fake.updateFilesMutex.RLock()
 	defer fake.updateFilesMutex.RUnlock()
 	argsForCall := fake.updateFilesArgsForCall[i]

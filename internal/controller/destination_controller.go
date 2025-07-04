@@ -28,8 +28,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	
-
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 
@@ -118,14 +116,7 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	logger = logger.WithValues("path", destination.Spec.Path)
-	filePathMode := destination.GetFilepathMode()
-
 	var writeErr error
-	if writeErr = r.writeTestFiles(writer, filePathMode); writeErr != nil {
-		logger.Error(writeErr, "unable to write dependencies to state store")
-	}
-
 	if condErr := r.updateReadyCondition(destination, writeErr); condErr != nil {
 		return ctrl.Result{}, condErr
 	}

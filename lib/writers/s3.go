@@ -118,44 +118,63 @@ func (b *S3Writer) ReadFile(filename string) ([]byte, error) {
 func (s *S3Writer) UpdateFiles(subDir string, workPlacementName string, image string, workloadsToDelete []string) (string, error) {
 	workloadsToCreate, err := s.getWorkloadsFromOCI(image)
 	if err != nil {
-		return "", err
+		s.Log.Error(err, "Error getting workloads from OCI image")
+		return "", nil
 	}
 	return s.update(subDir, workloadsToCreate, workloadsToDelete)
 }
 
 func (s *S3Writer) getWorkloadsFromOCI(image string) ([]v1alpha1.Workload, error) {
+	logger := s.Log.WithValues("image", image)
+	logger.Info("Starting OCI unarchive to extract workloads")
+
 	tempDir, err := unarchive.Unarchive(image)
 	if err != nil {
+		logger.Error(err, "Failed to unarchive OCI image")
 		return nil, err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if rmErr := os.RemoveAll(tempDir); rmErr != nil {
+			logger.Error(rmErr, "Failed to clean up tempDir", "path", tempDir)
+		}
+	}()
 
 	var workloads []v1alpha1.Workload
 	err = filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			logger.Error(err, "error walking filesystem", "path", path)
 			return err
 		}
-		if !info.IsDir() {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			relPath, err := filepath.Rel(tempDir, path)
-			if err != nil {
-				return err
-			}
-			workloads = append(workloads, v1alpha1.Workload{
-				Filepath: relPath,
-				Content:  string(content),
-			})
+		if info.IsDir() {
+			return nil
 		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			logger.Error(err, "failed to read file", "path", path)
+			return err
+		}
+
+		relPath, err := filepath.Rel(tempDir, path)
+		if err != nil {
+			logger.Error(err, "failed to compute relative path", "path", path)
+			return err
+		}
+
+		workloads = append(workloads, v1alpha1.Workload{
+			Filepath: relPath,
+			Content:  string(content),
+		})
+		logger.V(1).Info("Parsed workload file", "relPath", relPath)
 		return nil
 	})
 
 	if err != nil {
+		logger.Error(err, "Failed to walk temp directory", "baseDir", tempDir)
 		return nil, err
 	}
 
+	logger.Info("Successfully loaded workloads from OCI", "count", len(workloads))
 	return workloads, nil
 }
 

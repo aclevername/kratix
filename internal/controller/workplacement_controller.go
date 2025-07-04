@@ -98,10 +98,10 @@ func (r *WorkPlacementReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return requeue, err
 	}
 
-	if statusRequeue, statusErr := r.updateStatus(ctx, logger, workPlacement, versionID); statusErr != nil || statusRequeue.RequeueAfter > 0 {
-		return statusRequeue, statusErr
-	}
-
+	// if statusRequeue, statusErr := r.updateStatus(ctx, logger, workPlacement, versionID); statusErr != nil || statusRequeue.RequeueAfter > 0 {
+	// 	return statusRequeue, statusErr
+	// }
+	//
 	filepathMode := destination.GetFilepathMode()
 	if missingFinalizers := checkWorkPlacementFinalizers(workPlacement, filepathMode); len(missingFinalizers) > 0 {
 		return addFinalizers(opts, workPlacement, missingFinalizers)

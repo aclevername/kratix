@@ -71,6 +71,7 @@ func main() {
 
 	workCreator := pipeline.WorkCreator{
 		K8sClient: k8sClient,
+		Registry:  os.Getenv("OCI_REGISTRY"),
 	}
 
 	err = workCreator.Execute(inputDirectory, promiseName, namespace, resourceName, workflowType, pipelineName)

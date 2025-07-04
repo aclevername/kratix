@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/syntasso/kratix/lib/oci"
 	"github.com/syntasso/kratix/lib/objectutil"
 	"go.uber.org/zap/zapcore"
 
@@ -17,7 +17,6 @@ import (
 	"slices"
 
 	"github.com/syntasso/kratix/api/v1alpha1"
-	"github.com/syntasso/kratix/lib/compression"
 	"github.com/syntasso/kratix/lib/hash"
 	"github.com/syntasso/kratix/lib/resourceutil"
 	"k8s.io/apimachinery/pkg/labels"
@@ -29,6 +28,7 @@ import (
 
 type WorkCreator struct {
 	K8sClient client.Client
+	Registry  string
 }
 
 func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceName, workflowType, pipelineName string) error {
@@ -69,14 +69,15 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 		if !isRootDirectory(directory) {
 			directoriesToIgnoreForTheBaseScheduling = append(directoriesToIgnoreForTheBaseScheduling, directory)
 
-			workloads, err := w.getWorkloadsFromDir(pipelineOutputDir, filepath.Join(pipelineOutputDir, directory), nil)
-
+			workloadDir := filepath.Join(pipelineOutputDir, directory)
+			imageRef := fmt.Sprintf("%s/%s-%s:%s", w.Registry, promiseName, resourceName, directory)
+			err := oci.Push(workloadDir, imageRef)
 			if err != nil {
 				return err
 			}
 
 			workloadGroups = append(workloadGroups, v1alpha1.WorkloadGroup{
-				Workloads: workloads,
+				Image:     imageRef,
 				Directory: directory,
 				ID:        fmt.Sprintf("%x", md5.Sum([]byte(directory))),
 				DestinationSelectors: []v1alpha1.WorkloadGroupScheduling{
@@ -91,14 +92,20 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 		}
 	}
 
-	workloads, err := w.getWorkloadsFromDir(pipelineOutputDir, pipelineOutputDir, directoriesToIgnoreForTheBaseScheduling)
+	workloadFiles, err := w.getWorkloadFilesFromDir(pipelineOutputDir, pipelineOutputDir, directoriesToIgnoreForTheBaseScheduling)
 	if err != nil {
 		return err
 	}
 
-	if len(workloads) > 0 {
+	if len(workloadFiles) > 0 {
+		imageRef := fmt.Sprintf("%s/%s-%s:latest", w.Registry, promiseName, resourceName)
+		err := oci.Push(pipelineOutputDir, imageRef)
+		if err != nil {
+			return err
+		}
+
 		defaultWorkloadGroup := v1alpha1.WorkloadGroup{
-			Workloads: workloads,
+			Image:     imageRef,
 			Directory: v1alpha1.DefaultWorkloadGroupDirectory,
 			ID:        hash.ComputeHash(v1alpha1.DefaultWorkloadGroupDirectory),
 		}
@@ -206,58 +213,35 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 }
 
 // /kratix/output/     /kratix/output/   "bar"
-func (w *WorkCreator) getWorkloadsFromDir(prefixToTrimFromWorkloadFilepath, rootDir string, directoriesToIgnoreAtTheRootLevel []string) ([]v1alpha1.Workload, error) {
-	// decompress here
+func (w *WorkCreator) getWorkloadFilesFromDir(prefixToTrimFromWorkloadFilepath, rootDir string, directoriesToIgnoreAtTheRootLevel []string) ([]string, error) {
 	filesAndDirs, err := os.ReadDir(rootDir)
 	if err != nil {
 		return nil, err
 	}
 
-	var workloads []v1alpha1.Workload
+	var filePaths []string
 
 	for _, info := range filesAndDirs {
-		// TODO: currently we assume everything is a file or a dir, we don't handle
-		// more advanced scenarios, e.g. symlinks, file sizes, file permissions etc
 		if info.IsDir() {
 			if !slices.Contains(directoriesToIgnoreAtTheRootLevel, info.Name()) {
 				dir := filepath.Join(rootDir, info.Name())
-				newWorkloads, err := w.getWorkloadsFromDir(prefixToTrimFromWorkloadFilepath, dir, nil)
+				newFilePaths, err := w.getWorkloadFilesFromDir(prefixToTrimFromWorkloadFilepath, dir, nil)
 				if err != nil {
 					return nil, err
 				}
-				workloads = append(workloads, newWorkloads...)
+				filePaths = append(filePaths, newFilePaths...)
 			}
 		} else {
 			filePath := filepath.Join(rootDir, info.Name())
-			file, err := os.Open(filePath)
-			if err != nil {
-				return nil, err
-			}
-			byteValue, err := io.ReadAll(file)
-			if err != nil {
-				return nil, err
-			}
-
-			// trim /kratix/output/ from the filepath
 			path, err := filepath.Rel(prefixToTrimFromWorkloadFilepath, filePath)
 			if err != nil {
 				return nil, err
 			}
 
-			content, err := compression.CompressContent(byteValue)
-			if err != nil {
-				return nil, err
-			}
-
-			workload := v1alpha1.Workload{
-				Content:  string(content),
-				Filepath: path,
-			}
-
-			workloads = append(workloads, workload)
+			filePaths = append(filePaths, path)
 		}
 	}
-	return workloads, nil
+	return filePaths, nil
 }
 
 func (w *WorkCreator) getWorkflowScheduling(rootDirectory string) ([]v1alpha1.WorkflowDestinationSelectors, error) {

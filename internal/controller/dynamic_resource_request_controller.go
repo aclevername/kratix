@@ -147,15 +147,15 @@ func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 		return r.updateManualReconciliationLabel(opts.ctx, rr)
 	}
 
-	pipelineResources, err := promise.GenerateResourcePipelines(v1alpha1.WorkflowActionConfigure, rr, logger)
+	task, err := promise.GenerateResourcePipelines(v1alpha1.WorkflowActionConfigure, rr, logger)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if resourceutil.GetWorkflowsCounterStatus(rr, "workflows") != int64(len(pipelineResources)) {
-		resourceutil.SetStatus(rr, logger, "workflows", int64(len(pipelineResources)))
-		return ctrl.Result{}, r.Client.Status().Update(ctx, rr)
-	}
+	// if resourceutil.GetWorkflowsCounterStatus(rr, "workflows") != int64(len(pipelineResources)) {
+	// 	resourceutil.SetStatus(rr, logger, "workflows", int64(len(pipelineResources)))
+	// 	return ctrl.Result{}, r.Client.Status().Update(ctx, rr)
+	// }
 
 	jobOpts := workflow.NewOpts(
 		ctx,
@@ -163,7 +163,7 @@ func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 		r.EventRecorder,
 		logger,
 		rr,
-		pipelineResources,
+		task,
 		"resource",
 		r.NumberOfJobsToKeep,
 	)
@@ -181,7 +181,7 @@ func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 		return r.nextReconciliation(logger), r.updateWorkflowStatusCountersToZero(rr, ctx)
 	}
 
-	statusUpdate, err := r.generateResourceStatus(ctx, rr, int64(len(pipelineResources)))
+	statusUpdate, err := r.generateResourceStatus(ctx, rr, 1)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -375,12 +375,12 @@ func (r *DynamicResourceRequestController) deleteResources(o opts, promise *v1al
 	}
 
 	if controllerutil.ContainsFinalizer(resourceRequest, runDeleteWorkflowsFinalizer) {
-		pipelineResources, err := promise.GenerateResourcePipelines(v1alpha1.WorkflowActionDelete, resourceRequest, o.logger)
+		task, err := promise.GenerateResourcePipelines(v1alpha1.WorkflowActionDelete, resourceRequest, o.logger)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		jobOpts := workflow.NewOpts(o.ctx, o.client, r.EventRecorder, o.logger, resourceRequest, pipelineResources, "resource", r.NumberOfJobsToKeep)
+		jobOpts := workflow.NewOpts(o.ctx, o.client, r.EventRecorder, o.logger, resourceRequest, task, "resource", r.NumberOfJobsToKeep)
 		requeue, err := reconcileDelete(jobOpts)
 		if err != nil {
 			if errors.Is(err, workflow.ErrDeletePipelineFailed) {

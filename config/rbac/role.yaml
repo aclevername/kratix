@@ -137,3 +137,16 @@ rules:
   - list
   - update
   - watch
+- apiGroups:
+  - tekton.dev
+  resources:
+  - taskruns
+  - tasks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

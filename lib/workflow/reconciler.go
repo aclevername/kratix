@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/lib/resourceutil"
+	tekton "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gopkg.in/yaml.v2"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
@@ -30,6 +31,7 @@ type Opts struct {
 	parentObject *unstructured.Unstructured
 	//TODO make this field private too? or everything public and no constructor func
 	Resources          []v1alpha1.PipelineJobResources
+	TektonTask         *tekton.Task
 	workflowType       string
 	numberOfJobsToKeep int
 	eventRecorder      record.EventRecorder
@@ -40,7 +42,7 @@ type Opts struct {
 var minimumPeriodBetweenCreatingPipelineResources = 1100 * time.Millisecond
 var ErrDeletePipelineFailed = fmt.Errorf("Delete Pipeline Failed")
 
-func NewOpts(ctx context.Context, client client.Client, eventRecorder record.EventRecorder, logger logr.Logger, parentObj *unstructured.Unstructured, resources []v1alpha1.PipelineJobResources, workflowType string, numberOfJobsToKeep int) Opts {
+func NewOpts(ctx context.Context, client client.Client, eventRecorder record.EventRecorder, logger logr.Logger, parentObj *unstructured.Unstructured, task *tekton.Task, workflowType string, numberOfJobsToKeep int) Opts {
 	return Opts{
 		ctx:                ctx,
 		client:             client,
@@ -48,7 +50,7 @@ func NewOpts(ctx context.Context, client client.Client, eventRecorder record.Eve
 		parentObject:       parentObj,
 		workflowType:       workflowType,
 		numberOfJobsToKeep: numberOfJobsToKeep,
-		Resources:          resources,
+		TektonTask:         task,
 		eventRecorder:      eventRecorder,
 	}
 }

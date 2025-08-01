@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/internal/ptr"
+	tekton "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -350,45 +351,44 @@ func (p *Promise) GetWorkloadGroupScheduling() []WorkloadGroupScheduling {
 	return workloadGroupScheduling
 }
 
-func (p *Promise) generatePipelinesObjects(workflowType Type, workflowAction Action, resourceRequest *unstructured.Unstructured, logger logr.Logger) ([]PipelineJobResources, error) {
+func (p *Promise) generatePipelinesObjects(workflowType Type, workflowAction Action, resourceRequest *unstructured.Unstructured, logger logr.Logger) (*tekton.Task, error) {
 	promisePipelines, err := NewPipelinesMap(p, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	var allResources []PipelineJobResources
-	pipelines := promisePipelines[workflowType][workflowAction]
-
-	lastIndex := len(pipelines) - 1
-	for i, pipe := range pipelines {
-		isLast := i == lastIndex
-		additionalJobEnv := []corev1.EnvVar{
-			{Name: "IS_LAST_PIPELINE", Value: strconv.FormatBool(isLast)},
-		}
-
-		var resources PipelineJobResources
-		var err error
-		switch workflowType {
-		case WorkflowTypeResource:
-			resources, err = pipe.ForResource(p, workflowAction, resourceRequest).Resources(additionalJobEnv)
-		case WorkflowTypePromise:
-			resources, err = pipe.ForPromise(p, workflowAction).Resources(additionalJobEnv)
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		allResources = append(allResources, resources)
+	// var allResources []PipelineJobResources
+	// pipelines := promisePipelines[workflowType][workflowAction]
+	//
+	// lastIndex := len(pipelines) - 1
+	// for i, pipe := range pipelines {
+	// isLast := i == lastIndex
+	pipe := promisePipelines[workflowType][workflowAction][0] // For now we only support one pipeline per action
+	isLast := true
+	additionalJobEnv := []corev1.EnvVar{
+		{Name: "IS_LAST_PIPELINE", Value: strconv.FormatBool(isLast)},
 	}
 
-	return allResources, nil
+	switch workflowType {
+	case WorkflowTypeResource:
+		return pipe.ForResource(p, workflowAction, resourceRequest).Resources(additionalJobEnv)
+	case WorkflowTypePromise:
+		return pipe.ForPromise(p, workflowAction).Resources(additionalJobEnv)
+	}
+
+	return nil, fmt.Errorf("unknown workflow type %s", workflowType)
+
+	// 	allResources = append(allResources, resources)
+	// }
+	//
+	// return resources, nil
 }
 
-func (p *Promise) GeneratePromisePipelines(workflowAction Action, logger logr.Logger) ([]PipelineJobResources, error) {
+func (p *Promise) GeneratePromisePipelines(workflowAction Action, logger logr.Logger) (*tekton.Task, error) {
 	return p.generatePipelinesObjects(WorkflowTypePromise, workflowAction, nil, logger)
 }
 
-func (p *Promise) GenerateResourcePipelines(workflowAction Action, resourceRequest *unstructured.Unstructured, logger logr.Logger) ([]PipelineJobResources, error) {
+func (p *Promise) GenerateResourcePipelines(workflowAction Action, resourceRequest *unstructured.Unstructured, logger logr.Logger) (*tekton.Task, error) {
 	return p.generatePipelinesObjects(WorkflowTypeResource, workflowAction, resourceRequest, logger)
 }
 

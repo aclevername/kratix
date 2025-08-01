@@ -8,6 +8,8 @@ import (
 
 	"github.com/syntasso/kratix/lib/hash"
 	"github.com/syntasso/kratix/lib/objectutil"
+	tekton "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gopkg.in/yaml.v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,64 +36,149 @@ type PipelineFactory struct {
 }
 
 // Resources configures the job Resources for a pipeline.
-func (p *PipelineFactory) Resources(jobEnv []corev1.EnvVar) (PipelineJobResources, error) {
-	wgScheduling := p.Promise.GetWorkloadGroupScheduling()
-	schedulingConfigMap, err := p.configMap(wgScheduling)
-	if err != nil {
-		return PipelineJobResources{}, err
+// manifests generated
+func (p *PipelineFactory) Resources(jobEnv []corev1.EnvVar) (*tekton.Task, error) {
+	var dynamicSteps []v1.Step = nil
+	for _, c := range p.Pipeline.Spec.Containers {
+		if c.SecurityContext == nil {
+			c.SecurityContext = DefaultUserProvidedContainersSecurityContext
+		}
+
+		if c.ImagePullPolicy == "" {
+			c.ImagePullPolicy = DefaultImagePullPolicy
+		}
+
+		if c.Resources == nil {
+			c.Resources = DefaultResourceRequirements
+		}
+		dynamicSteps = append(dynamicSteps, v1.Step{
+			Name:            c.Name,
+			Image:           c.Image,
+			Args:            c.Args,
+			Command:         c.Command,
+			Env:             append(p.defaultEnvVars(), c.Env...),
+			EnvFrom:         c.EnvFrom,
+			ImagePullPolicy: c.ImagePullPolicy,
+			SecurityContext: c.SecurityContext,
+		})
 	}
 
-	sa := p.serviceAccount()
-
-	job, err := p.pipelineJob(schedulingConfigMap, sa, jobEnv)
-	if err != nil {
-		return PipelineJobResources{}, err
-	}
-
-	clusterRoles := p.clusterRole()
-
-	clusterRoleBindings := p.clusterRoleBinding(clusterRoles, sa)
-
-	roles, err := p.role()
-	if err != nil {
-		return PipelineJobResources{}, err
-	}
-
-	roleBindings := p.roleBindings(roles, clusterRoles, sa)
-
-	return PipelineJobResources{
-		Name:           p.Pipeline.GetName(),
-		PipelineID:     p.ID,
-		Job:            job,
-		WorkflowType:   p.WorkflowType,
-		WorkflowAction: p.WorkflowAction,
-		Shared: SharedPipelineResources{
-			ServiceAccount:      sa,
-			ConfigMap:           schedulingConfigMap,
-			Roles:               roles,
-			RoleBindings:        roleBindings,
-			ClusterRoles:        clusterRoles,
-			ClusterRoleBindings: clusterRoleBindings,
+	staticPrefixSteps := []tekton.Step{
+		{
+			Name:    "reader",
+			Image:   os.Getenv("PIPELINE_ADAPTER_IMG"),
+			Command: []string{"/bin/pipeline-adapter"},
+			Args:    []string{"reader"},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "input", MountPath: "/input"},
+				{Name: "output", MountPath: "/output"},
+			},
+			Env: p.defaultEnvVars(),
 		},
-	}, nil
-}
-
-func (p *PipelineFactory) serviceAccount() *corev1.ServiceAccount {
-	serviceAccountName := p.ID
-	if p.Pipeline.Spec.RBAC.ServiceAccount != "" {
-		serviceAccountName = p.Pipeline.Spec.RBAC.ServiceAccount
 	}
-	return &corev1.ServiceAccount{
+
+	obj, _, err := p.getObjAndHash()
+	if err != nil {
+		return nil, err
+	}
+
+	// Static steps after dynamic steps
+	staticSuffixSteps := []tekton.Step{
+		{
+			Name:  "organise-files",
+			Image: os.Getenv("PIPELINE_ADAPTER_IMG"),
+			Script: `#!/bin/sh
+mkdir -p /work-creator-files/input
+cp /output/* /work-creator-files/input/ || true
+mkdir -p /work-creator-files/metadata
+cp /metadata/* /work-creator-files/metadata/ || true
+mkdir -p /work-creator-files/kratix-system
+cp /configmap/selectors /work-creator-files/kratix-system/promise-cluster-selectors
+echo "done"
+exit 0`,
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "configmap", MountPath: "/configmap"},
+				{Name: "metadata", MountPath: "/metadata"},
+				{Name: "output", MountPath: "/output"},
+				{Name: "work-creator-files", MountPath: "/work-creator-files"},
+			},
+		},
+		{
+			Name:    "work-creator",
+			Image:   os.Getenv("PIPELINE_ADAPTER_IMG"),
+			Command: []string{"/bin/pipeline-adapter"},
+			Args: []string{
+				"work-creator",
+				"--input-directory", "/work-creator-files",
+				"--promise-name", p.Promise.GetName(),
+				"--pipeline-name", p.Pipeline.GetName(),
+				"--namespace", p.Namespace,
+				"--workflow-type", string(p.WorkflowType),
+				"--resource-name", p.ResourceRequest.GetName(),
+			},
+			Env: p.defaultEnvVars(),
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "work-creator-files", MountPath: "/work-creator-files"},
+			},
+		},
+		{
+			Name:    "update-status",
+			Image:   os.Getenv("PIPELINE_ADAPTER_IMG"),
+			Command: []string{"/bin/pipeline-adapter"},
+			Args:    []string{"update-status"},
+			Env: append(p.defaultEnvVars(),
+				corev1.EnvVar{Name: KratixObjectKindEnvVar, Value: strings.ToLower(obj.GetKind())},
+				corev1.EnvVar{Name: KratixObjectGroupEnvVar, Value: obj.GroupVersionKind().Group},
+				corev1.EnvVar{Name: KratixObjectVersionEnvVar, Value: obj.GroupVersionKind().Version},
+				corev1.EnvVar{Name: KratixObjectNameEnvVar, Value: obj.GetName()},
+				corev1.EnvVar{Name: KratixObjectNamespaceEnvVar, Value: p.Namespace},
+				corev1.EnvVar{Name: KratixCrdPluralEnvVar, Value: p.CRDPlural},
+				corev1.EnvVar{Name: KratixClusterScopedEnvVar, Value: strconv.FormatBool(p.ClusterScoped)},
+			),
+		},
+	}
+
+	// Combine all steps in correct order
+	allSteps := append(staticPrefixSteps, dynamicSteps...)
+	allSteps = append(allSteps, staticSuffixSteps...)
+
+	return &tekton.Task{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "ServiceAccount",
+			APIVersion: "tekton.dev/v1",
+			Kind:       "Task",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceAccountName,
-			Namespace: p.Namespace,
-			Labels:    promiseNameLabel(p.Promise.GetName()),
+			Name: "kratix-pipeline",
 		},
-	}
+		Spec: tekton.TaskSpec{
+			Params: []tekton.ParamSpec{
+				{Name: "resourceKind", Type: tekton.ParamTypeString},
+				{Name: "resourceName", Type: tekton.ParamTypeString},
+				{Name: "resourceNamespace", Type: tekton.ParamTypeString},
+				{Name: "promiseIdentifier", Type: tekton.ParamTypeString},
+				{Name: "pipelineImage", Type: tekton.ParamTypeString},
+			},
+			Steps: allSteps,
+			Volumes: []corev1.Volume{
+				{
+					Name: "configmap",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "cluster-selectors-$(params.promiseIdentifier)",
+							},
+						},
+					},
+				},
+			},
+			Workspaces: []tekton.WorkspaceDeclaration{
+				{Name: "metadata"},
+				{Name: "input"},
+				{Name: "output"},
+				{Name: "work-creator-files"},
+			},
+		},
+	}, nil
 }
 
 func (p *PipelineFactory) configMap(workloadGroupScheduling []WorkloadGroupScheduling) (*corev1.ConfigMap, error) {

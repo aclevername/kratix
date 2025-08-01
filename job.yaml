@@ -1,0 +1,255 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  creationTimestamp: "2025-08-01T09:01:20Z"
+  generation: 1
+  labels:
+    app.kubernetes.io/managed-by: Kratix
+    kratix.io/hash: 1539ba7247857d546c898017aebb245d
+    kratix.io/pipeline-name: instance-configure
+    kratix.io/promise-name: namespace
+    kratix.io/resource-name: example
+    kratix.io/workflow-action: configure
+    kratix.io/workflow-type: resource
+  name: kratix-namespace-example-instance-configure-2d798
+  namespace: default
+  ownerReferences:
+  - apiVersion: marketplace.kratix.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: namespace
+    name: example
+    uid: 7bd61778-b68e-41df-ac66-6998ec93fb42
+  resourceVersion: "2832"
+  uid: ef5251da-3676-48c5-9729-9ef5f473614c
+spec:
+  backoffLimit: 6
+  completionMode: NonIndexed
+  completions: 1
+  manualSelector: false
+  parallelism: 1
+  podReplacementPolicy: TerminatingOrFailed
+  selector:
+    matchLabels:
+      batch.kubernetes.io/controller-uid: ef5251da-3676-48c5-9729-9ef5f473614c
+  suspend: false
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app.kubernetes.io/managed-by: Kratix
+        batch.kubernetes.io/controller-uid: ef5251da-3676-48c5-9729-9ef5f473614c
+        batch.kubernetes.io/job-name: kratix-namespace-example-instance-configure-2d798
+        controller-uid: ef5251da-3676-48c5-9729-9ef5f473614c
+        job-name: kratix-namespace-example-instance-configure-2d798
+        kratix.io/hash: 1539ba7247857d546c898017aebb245d
+        kratix.io/pipeline-name: instance-configure
+        kratix.io/promise-name: namespace
+        kratix.io/resource-name: example
+        kratix.io/workflow-action: configure
+        kratix.io/workflow-type: resource
+    spec:
+      containers:
+      - args:
+        - update-status
+        command:
+        - /bin/pipeline-adapter
+        env:
+        - name: IS_LAST_PIPELINE
+          value: "true"
+        - name: KRATIX_OBJECT_KIND
+          value: namespace
+        - name: KRATIX_OBJECT_GROUP
+          value: marketplace.kratix.io
+        - name: KRATIX_OBJECT_VERSION
+          value: v1alpha1
+        - name: KRATIX_OBJECT_NAME
+          value: example
+        - name: KRATIX_OBJECT_NAMESPACE
+          value: default
+        - name: KRATIX_CRD_PLURAL
+          value: namespaces
+        - name: KRATIX_CLUSTER_SCOPED
+          value: "false"
+        image: docker.io/syntassodev/kratix-platform-pipeline-adapter:dev
+        imagePullPolicy: IfNotPresent
+        name: status-writer
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /work-creator-files/metadata
+          name: shared-metadata
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - args:
+        - reader
+        command:
+        - /bin/pipeline-adapter
+        env:
+        - name: KRATIX_WORKFLOW_ACTION
+          value: configure
+        - name: KRATIX_WORKFLOW_TYPE
+          value: resource
+        - name: KRATIX_PROMISE_NAME
+          value: namespace
+        - name: KRATIX_PIPELINE_NAME
+          value: instance-configure
+        - name: KRATIX_OBJECT_KIND
+          value: namespace
+        - name: KRATIX_OBJECT_GROUP
+          value: marketplace.kratix.io
+        - name: KRATIX_OBJECT_VERSION
+          value: v1alpha1
+        - name: KRATIX_OBJECT_NAME
+          value: example
+        - name: KRATIX_OBJECT_NAMESPACE
+          value: default
+        - name: KRATIX_CRD_PLURAL
+          value: namespaces
+        - name: KRATIX_CLUSTER_SCOPED
+          value: "false"
+        image: docker.io/syntassodev/kratix-platform-pipeline-adapter:dev
+        imagePullPolicy: IfNotPresent
+        name: reader
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /kratix/input
+          name: shared-input
+        - mountPath: /kratix/output
+          name: shared-output
+      - env:
+        - name: KRATIX_WORKFLOW_ACTION
+          value: configure
+        - name: KRATIX_WORKFLOW_TYPE
+          value: resource
+        - name: KRATIX_PROMISE_NAME
+          value: namespace
+        - name: KRATIX_PIPELINE_NAME
+          value: instance-configure
+        - name: KRATIX_OBJECT_KIND
+          value: namespace
+        - name: KRATIX_OBJECT_GROUP
+          value: marketplace.kratix.io
+        - name: KRATIX_OBJECT_VERSION
+          value: v1alpha1
+        - name: KRATIX_OBJECT_NAME
+          value: example
+        - name: KRATIX_OBJECT_NAMESPACE
+          value: default
+        - name: KRATIX_CRD_PLURAL
+          value: namespaces
+        - name: KRATIX_CLUSTER_SCOPED
+          value: "false"
+        image: ghcr.io/syntasso/kratix-marketplace/namespace-configure-pipeline:v0.1.0
+        imagePullPolicy: IfNotPresent
+        name: namespace-configure-pipeline
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /kratix/input
+          name: shared-input
+          readOnly: true
+        - mountPath: /kratix/output
+          name: shared-output
+        - mountPath: /kratix/metadata
+          name: shared-metadata
+      - args:
+        - work-creator
+        - --input-directory
+        - /work-creator-files
+        - --promise-name
+        - namespace
+        - --pipeline-name
+        - instance-configure
+        - --namespace
+        - default
+        - --workflow-type
+        - resource
+        - --resource-name
+        - example
+        command:
+        - /bin/pipeline-adapter
+        image: docker.io/syntassodev/kratix-platform-pipeline-adapter:dev
+        imagePullPolicy: IfNotPresent
+        name: work-writer
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /work-creator-files/input
+          name: shared-output
+        - mountPath: /work-creator-files/metadata
+          name: shared-metadata
+        - mountPath: /work-creator-files/kratix-system
+          name: promise-scheduling
+      restartPolicy: OnFailure
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: namespace-resource-configure-instance-configure
+      serviceAccountName: namespace-resource-configure-instance-configure
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          items:
+          - key: destinationSelectors
+            path: promise-scheduling
+          name: destination-selectors-namespace
+        name: promise-scheduling
+      - emptyDir: {}
+        name: shared-input
+      - emptyDir: {}
+        name: shared-output
+      - emptyDir: {}
+        name: shared-metadata
+status:
+  completionTime: "2025-08-01T09:01:43Z"
+  conditions:
+  - lastProbeTime: "2025-08-01T09:01:43Z"
+    lastTransitionTime: "2025-08-01T09:01:43Z"
+    message: Reached expected number of succeeded pods
+    reason: CompletionsReached
+    status: "True"
+    type: SuccessCriteriaMet
+  - lastProbeTime: "2025-08-01T09:01:43Z"
+    lastTransitionTime: "2025-08-01T09:01:43Z"
+    message: Reached expected number of succeeded pods
+    reason: CompletionsReached
+    status: "True"
+    type: Complete
+  ready: 0
+  startTime: "2025-08-01T09:01:20Z"
+  succeeded: 1
+  terminating: 0
+  uncountedTerminatedPods: {}

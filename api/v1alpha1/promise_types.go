@@ -352,18 +352,12 @@ func (p *Promise) GetWorkloadGroupScheduling() []WorkloadGroupScheduling {
 }
 
 func (p *Promise) generatePipelinesObjects(workflowType Type, workflowAction Action, resourceRequest *unstructured.Unstructured, logger logr.Logger) (*tekton.Task, error) {
-	promisePipelines, err := NewPipelinesMap(p, logger)
+	pipes, err := PipelinesFromUnstructured(p.Spec.Workflows.Resource.Configure, logger)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed parsing pipeline: %w", err)
 	}
+	pipe := pipes[0] // TODO: Support multiple pipelines
 
-	// var allResources []PipelineJobResources
-	// pipelines := promisePipelines[workflowType][workflowAction]
-	//
-	// lastIndex := len(pipelines) - 1
-	// for i, pipe := range pipelines {
-	// isLast := i == lastIndex
-	pipe := promisePipelines[workflowType][workflowAction][0] // For now we only support one pipeline per action
 	isLast := true
 	additionalJobEnv := []corev1.EnvVar{
 		{Name: "IS_LAST_PIPELINE", Value: strconv.FormatBool(isLast)},

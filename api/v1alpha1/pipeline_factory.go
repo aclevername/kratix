@@ -9,7 +9,6 @@ import (
 	"github.com/syntasso/kratix/lib/hash"
 	"github.com/syntasso/kratix/lib/objectutil"
 	tekton "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gopkg.in/yaml.v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -35,23 +34,20 @@ type PipelineFactory struct {
 	CRDPlural        string
 }
 
-// Resources configures the job Resources for a pipeline.
-// manifests generated
 func (p *PipelineFactory) Resources(jobEnv []corev1.EnvVar) (*tekton.Task, error) {
-	var dynamicSteps []v1.Step = nil
+	var dynamicSteps []tekton.Step
 	for _, c := range p.Pipeline.Spec.Containers {
 		if c.SecurityContext == nil {
 			c.SecurityContext = DefaultUserProvidedContainersSecurityContext
 		}
-
 		if c.ImagePullPolicy == "" {
 			c.ImagePullPolicy = DefaultImagePullPolicy
 		}
-
 		if c.Resources == nil {
 			c.Resources = DefaultResourceRequirements
 		}
-		dynamicSteps = append(dynamicSteps, v1.Step{
+
+		dynamicSteps = append(dynamicSteps, tekton.Step{
 			Name:            c.Name,
 			Image:           c.Image,
 			Args:            c.Args,
@@ -60,6 +56,11 @@ func (p *PipelineFactory) Resources(jobEnv []corev1.EnvVar) (*tekton.Task, error
 			EnvFrom:         c.EnvFrom,
 			ImagePullPolicy: c.ImagePullPolicy,
 			SecurityContext: c.SecurityContext,
+			Workspaces: []tekton.WorkspaceUsage{
+				{Name: "input", MountPath: "/kratix/input"},
+				{Name: "output", MountPath: "/kratix/output"},
+				{Name: "metadata", MountPath: "/kratix/metadata"},
+			},
 		})
 	}
 
@@ -69,9 +70,9 @@ func (p *PipelineFactory) Resources(jobEnv []corev1.EnvVar) (*tekton.Task, error
 			Image:   os.Getenv("PIPELINE_ADAPTER_IMG"),
 			Command: []string{"/bin/pipeline-adapter"},
 			Args:    []string{"reader"},
-			VolumeMounts: []corev1.VolumeMount{
-				{Name: "input", MountPath: "/input"},
-				{Name: "output", MountPath: "/output"},
+			Workspaces: []tekton.WorkspaceUsage{
+				{Name: "input", MountPath: "/kratix/input"},
+				{Name: "output", MountPath: "/kratix/output"},
 			},
 			Env: p.defaultEnvVars(),
 		},
@@ -82,25 +83,26 @@ func (p *PipelineFactory) Resources(jobEnv []corev1.EnvVar) (*tekton.Task, error
 		return nil, err
 	}
 
-	// Static steps after dynamic steps
 	staticSuffixSteps := []tekton.Step{
 		{
 			Name:  "organise-files",
-			Image: os.Getenv("PIPELINE_ADAPTER_IMG"),
+			Image: "ghcr.io/syntasso/kratix-pipeline-utility:v0.0.1",
 			Script: `#!/bin/sh
 mkdir -p /work-creator-files/input
-cp /output/* /work-creator-files/input/ || true
+cp /kratix/output/* /work-creator-files/input/ || true
 mkdir -p /work-creator-files/metadata
-cp /metadata/* /work-creator-files/metadata/ || true
+cp /kratix/metadata/* /work-creator-files/metadata/ || true
 mkdir -p /work-creator-files/kratix-system
 cp /configmap/selectors /work-creator-files/kratix-system/promise-cluster-selectors
 echo "done"
 exit 0`,
+			Workspaces: []tekton.WorkspaceUsage{
+				{Name: "metadata", MountPath: "/kratix/metadata"},
+				{Name: "output", MountPath: "/kratix/output"},
+				{Name: "work-creator-files", MountPath: "/work-creator-files"}, // leave as-is
+			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "configmap", MountPath: "/configmap"},
-				{Name: "metadata", MountPath: "/metadata"},
-				{Name: "output", MountPath: "/output"},
-				{Name: "work-creator-files", MountPath: "/work-creator-files"},
 			},
 		},
 		{
@@ -117,8 +119,8 @@ exit 0`,
 				"--resource-name", p.ResourceRequest.GetName(),
 			},
 			Env: p.defaultEnvVars(),
-			VolumeMounts: []corev1.VolumeMount{
-				{Name: "work-creator-files", MountPath: "/work-creator-files"},
+			Workspaces: []tekton.WorkspaceUsage{
+				{Name: "work-creator-files", MountPath: "/work-creator-files"}, // leave as-is
 			},
 		},
 		{
@@ -138,7 +140,6 @@ exit 0`,
 		},
 	}
 
-	// Combine all steps in correct order
 	allSteps := append(staticPrefixSteps, dynamicSteps...)
 	allSteps = append(allSteps, staticSuffixSteps...)
 
@@ -151,13 +152,6 @@ exit 0`,
 			Name: "kratix-pipeline",
 		},
 		Spec: tekton.TaskSpec{
-			Params: []tekton.ParamSpec{
-				{Name: "resourceKind", Type: tekton.ParamTypeString},
-				{Name: "resourceName", Type: tekton.ParamTypeString},
-				{Name: "resourceNamespace", Type: tekton.ParamTypeString},
-				{Name: "promiseIdentifier", Type: tekton.ParamTypeString},
-				{Name: "pipelineImage", Type: tekton.ParamTypeString},
-			},
 			Steps: allSteps,
 			Volumes: []corev1.Volume{
 				{
@@ -165,7 +159,7 @@ exit 0`,
 					VolumeSource: corev1.VolumeSource{
 						ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "cluster-selectors-$(params.promiseIdentifier)",
+								Name: "cluster-selectors-" + p.Promise.GetName(),
 							},
 						},
 					},

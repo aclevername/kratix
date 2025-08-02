@@ -157,6 +157,9 @@ func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 	// 	return ctrl.Result{}, r.Client.Status().Update(ctx, rr)
 	// }
 
+	logger.Info("Task", "task", task)
+	fmt.Printf("\n\nTask: %v\n\n", task)
+
 	jobOpts := workflow.NewOpts(
 		ctx,
 		r.Client,

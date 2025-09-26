@@ -74,6 +74,9 @@ type PromiseSpec struct {
 
 	// A list of key and value pairs (labels) used for scheduling.
 	DestinationSelectors []PromiseScheduling `json:"destinationSelectors,omitempty"`
+
+	// How to roll upgrades across existing Resources.
+	UpgradeStrategy *UpgradeStrategy `json:"upgradeStrategy,omitempty"`
 }
 
 type RequiredPromise struct {

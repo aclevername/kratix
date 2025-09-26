@@ -1,0 +1,155 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-backend
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-frontend
+
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: dev-eu-gold-backend-canary
+  namespace: team-backend
+  labels:
+    env: dev
+    region: europe
+    tier: gold
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: dev-eu-gold-backend-app-cache
+  namespace: team-backend
+  labels:
+    env: dev
+    region: europe
+    tier: gold
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: dev-us-silver-backend-session-store
+  namespace: team-backend
+  labels:
+    env: dev
+    region: america
+    tier: silver
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: staging-eu-silver-backend-metrics
+  namespace: team-backend
+  labels:
+    env: staging
+    region: europe
+    tier: silver
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: prod-eu-gold-backend-orders
+  namespace: team-backend
+  labels:
+    env: prod
+    region: europe
+    tier: gold
+spec:
+  size: large
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: prod-us-gold-backend-payments
+  namespace: team-backend
+  labels:
+    env: prod
+    region: america
+    tier: gold
+spec:
+  size: large
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: dev-us-gold-frontend-canary
+  namespace: team-frontend
+  labels:
+    env: dev
+    region: america
+    tier: gold
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: dev-eu-silver-frontend-ui-cache
+  namespace: team-frontend
+  labels:
+    env: dev
+    region: europe
+    tier: silver
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: staging-us-silver-frontend-ab-tests
+  namespace: team-frontend
+  labels:
+    env: staging
+    region: america
+    tier: silver
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: prod-eu-gold-frontend-content
+  namespace: team-frontend
+  labels:
+    env: prod
+    region: europe
+    tier: gold
+spec:
+  size: large
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: prod-us-gold-frontend-personalization
+  namespace: team-frontend
+  labels:
+    env: prod
+    region: america
+    tier: gold
+spec:
+  size: large
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: dev-eu-bronze-frontend-preview
+  namespace: team-frontend
+  labels:
+    env: dev
+    region: europe
+    tier: bronze
+spec:
+  size: small

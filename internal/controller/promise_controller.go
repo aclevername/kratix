@@ -71,6 +71,7 @@ type PromiseReconciler struct {
 	Log                       logr.Logger
 	Manager                   ctrl.Manager
 	StartedDynamicControllers map[string]*DynamicResourceRequestController
+	StartedUpgradeControllers map[string]*UpgradeController
 	RestartManager            func()
 	NumberOfJobsToKeep        int
 	ReconciliationInterval    time.Duration
@@ -128,6 +129,9 @@ var (
 func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	if r.StartedDynamicControllers == nil {
 		r.StartedDynamicControllers = make(map[string]*DynamicResourceRequestController)
+	}
+	if r.StartedUpgradeControllers == nil {
+		r.StartedUpgradeControllers = make(map[string]*UpgradeController)
 	}
 	promise := &v1alpha1.Promise{}
 	err := r.Client.Get(ctx, req.NamespacedName, promise)
@@ -262,6 +266,10 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		if err = r.ensureDynamicControllerIsStarted(promise, rrCRD, rrGVK, &dynamicControllerCanCreateResources, logger); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err = r.ensureUpgradeControllerIsStarted(promise, rrCRD, rrGVK, &dynamicControllerCanCreateResources, logger); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -502,8 +510,9 @@ func (r *PromiseReconciler) updateWorksSucceededCondition(
 
 func (r *PromiseReconciler) reconcileResources(ctx context.Context, logger logr.Logger, promise *v1alpha1.Promise,
 	rrGVK *schema.GroupVersionKind) (ctrl.Result, error) {
+	upgradeStrategy := promise.Labels[resourceutil.UpgradeStrategyLabel]
 	logger.Info("reconciling all resource requests of promise", "promiseName", promise.Name)
-	if err := r.reconcileAllRRs(rrGVK); err != nil {
+	if err := r.reconcileAllRRs(rrGVK, upgradeStrategy, promise.Generation); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -830,7 +839,11 @@ func (r *PromiseReconciler) reconcileDependenciesAndPromiseWorkflows(o opts, pro
 	return nil, nil
 }
 
-func (r *PromiseReconciler) reconcileAllRRs(rrGVK *schema.GroupVersionKind) error {
+func (r *PromiseReconciler) reconcileAllRRs(rrGVK *schema.GroupVersionKind, upgradeStrategy string, promiseGeneration int64) error {
+	if promiseGeneration == 0 || promiseGeneration == 1 {
+		//skip first generation as they will be created with the correct labels
+		return nil
+	}
 	//label all rr with manual reconciliation
 	rrs := &unstructured.UnstructuredList{}
 	rrListGVK := *rrGVK
@@ -845,13 +858,85 @@ func (r *PromiseReconciler) reconcileAllRRs(rrGVK *schema.GroupVersionKind) erro
 		if newLabels == nil {
 			newLabels = make(map[string]string)
 		}
-		newLabels[resourceutil.ManualReconciliationLabel] = "true"
+
+		upgradeStrategy = "random"
+		newLabels[resourceutil.UpgradeStrategyLabel] = upgradeStrategy
+		newLabels["kratix.io/promise-generation"] = fmt.Sprintf("%d", promiseGeneration)
+		delete(newLabels, "kratix.io/upgrade")
+		r.Log.Info("new labels", "labels", newLabels)
 		rr.SetLabels(newLabels)
 		if err := r.Client.Update(context.Background(), &rr); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *PromiseReconciler) ensureUpgradeControllerIsStarted(promise *v1alpha1.Promise, rrCRD *apiextensionsv1.CustomResourceDefinition, rrGVK *schema.GroupVersionKind, canCreateResources *bool, logger logr.Logger) error {
+	if r.upgradeControllerHasAlreadyStarted(promise, logger) {
+		logger.Info("dynamic upgrade controller already started, ensuring it is up to date")
+
+		upgradeController := r.StartedUpgradeControllers[promise.GetDynamicControllerName(logger)]
+		upgradeController.GVK = rrGVK
+		upgradeController.CRD = rrCRD
+
+		upgradeController.CanCreateResources = canCreateResources
+
+		upgradeController.PromiseDestinationSelectors = promise.Spec.DestinationSelectors
+
+		return nil
+	}
+
+	enabled := true
+	upgradeController := &UpgradeController{
+		Client:                      r.Client,
+		Scheme:                      r.Scheme,
+		GVK:                         rrGVK,
+		CRD:                         rrCRD,
+		PromiseIdentifier:           promise.GetName(),
+		PromiseDestinationSelectors: promise.Spec.DestinationSelectors,
+		Log:                         r.Log.WithName("upgrade-controller-" + promise.GetName()),
+		UID:                         string(promise.GetUID())[0:5],
+		Enabled:                     &enabled,
+		CanCreateResources:          canCreateResources,
+		NumberOfJobsToKeep:          r.NumberOfJobsToKeep,
+		ReconciliationInterval:      r.ReconciliationInterval,
+		EventRecorder:               r.Manager.GetEventRecorderFor("UpgradeController"),
+	}
+	r.StartedUpgradeControllers[promise.GetDynamicControllerName(logger)] = upgradeController
+
+	unstructuredCRD := &unstructured.Unstructured{}
+	unstructuredCRD.SetGroupVersionKind(*rrGVK)
+
+	return ctrl.NewControllerManagedBy(r.Manager).
+		For(unstructuredCRD).
+		Watches(
+			&batchv1.Job{},
+			handler.EnqueueRequestsFromMapFunc(r.jobEventHandler(promise)),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				// Only watch Jobs that are managed by Kratix
+				labels := obj.GetLabels()
+				return labels != nil && labels[v1alpha1.ManagedByLabel] == v1alpha1.ManagedByLabelValue
+			})),
+		).
+		Watches(
+			&v1alpha1.Work{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				work := obj.(*v1alpha1.Work)
+				rrName, labelExists := work.Labels[v1alpha1.ResourceNameLabel]
+				if !labelExists || work.Labels[v1alpha1.PromiseNameLabel] != promise.GetName() {
+					return nil
+				}
+
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{
+						Namespace: work.Namespace,
+						Name:      rrName,
+					},
+				}}
+			}),
+		).
+		Complete(upgradeController)
 }
 
 func (r *PromiseReconciler) ensureDynamicControllerIsStarted(promise *v1alpha1.Promise, rrCRD *apiextensionsv1.CustomResourceDefinition, rrGVK *schema.GroupVersionKind, canCreateResources *bool, logger logr.Logger) error {
@@ -923,6 +1008,11 @@ func (r *PromiseReconciler) ensureDynamicControllerIsStarted(promise *v1alpha1.P
 			}),
 		).
 		Complete(dynamicResourceRequestController)
+}
+
+func (r *PromiseReconciler) upgradeControllerHasAlreadyStarted(promise *v1alpha1.Promise, logger logr.Logger) bool {
+	_, ok := r.StartedUpgradeControllers[promise.GetDynamicControllerName(logger)]
+	return ok
 }
 
 func (r *PromiseReconciler) dynamicControllerHasAlreadyStarted(promise *v1alpha1.Promise, logger logr.Logger) bool {

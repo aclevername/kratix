@@ -451,7 +451,7 @@ func (p *PipelineFactory) getObjAndHash() (*unstructured.Unstructured, string, e
 		return nil, "", err
 	}
 
-	return p.ResourceRequest, hash.ComputeHash(fmt.Sprintf("%s-%s", promiseHash, resourceHash)), nil
+	return p.ResourceRequest, hash.ComputeHash(fmt.Sprintf("%s-%s", p.Promise.Name, resourceHash)), nil
 }
 
 func (p *PipelineFactory) role() ([]rbacv1.Role, error) {

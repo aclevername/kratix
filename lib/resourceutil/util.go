@@ -23,6 +23,7 @@ const (
 	DeleteWorkflowCompletedFailedReason    = "DeleteWorkflowFailed"
 	PipelinesExecutedSuccessfully          = "PipelinesExecutedSuccessfully"
 	ManualReconciliationLabel              = "kratix.io/manual-reconciliation"
+	UpgradeStrategyLabel                   = "kratix.io/upgrade-strategy"
 	ReconcileResourcesLabel                = "kratix.io/reconcile-resources"
 	promiseAvailableCondition              = clusterv1.ConditionType("PromiseAvailable")
 	promiseRequirementsNotMetReason        = "PromiseRequirementsNotInstalled"

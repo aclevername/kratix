@@ -1,0 +1,111 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: Promise
+metadata:
+  creationTimestamp: null
+  name: redis
+  labels:
+    kratix.io/promise-version: v0.1.0
+spec:
+  upgradeStrategy:
+    waves:
+      # 1) Hand-picked canaries first
+      - name: canaries
+        select:
+          names:
+            - team-backend/dev-eu-gold-backend-canary
+            - team-frontend/dev-us-gold-frontend-canary
+
+      # 2) All dev in backend and frontend namespaces
+      - name: dev-in-teams
+        select:
+          matchLabels: { env: dev }
+          namespaces: ["team-backend", "team-frontend"]
+
+      # 3) Anything left in those namespaces regardless of labels
+      - name: remainder-in-teams
+        select:
+          namespaces: ["team-backend", "team-frontend"]
+
+      # 4) All staging in europe across the cluster
+      - name: staging-europe
+        select:
+          matchLabels: { env: staging, region: europe }
+
+      # 5) Any remaining dev anywhere
+      - name: remainder-dev
+        select:
+          matchLabels: { env: dev }
+
+      # 6) Prod in backend where resources are tier gold and region europe
+      - name: prod-backend-gold-eu
+        select:
+          matchLabels: { env: prod, tier: gold, region: europe }
+          namespaces: ["team-backend"]
+
+      # 7) Remaining prod in frontend
+      - name: prod-frontend
+        select:
+          matchLabels: { env: prod }
+          namespaces: ["team-frontend"]
+
+      # 8) Final catch-all
+      - name: everything-else
+        select:
+          remainder: true
+  destinationSelectors:
+  - matchLabels:
+      environment: dev
+  api:
+    apiVersion: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    metadata:
+      name: redis.marketplace.kratix.io
+    spec:
+      group: marketplace.kratix.io
+      names:
+        kind: redis
+        plural: redis
+        singular: redis
+      scope: Namespaced
+      versions:
+        - name: v1alpha1
+          schema:
+            openAPIV3Schema:
+              properties:
+                spec:
+                  properties:
+                    size:
+                      default: small
+                      description: |
+                        Size of this Redis deployment. If small, it deploy redis with a single replica; if large, deploy redis with 3 replicas.
+                      pattern: ^(small|large)$
+                      type: string
+                  type: object
+              type: object
+          served: true
+          storage: true
+  workflows:
+    resource:
+      configure:
+        - apiVersion: platform.kratix.io/v1alpha1
+          kind: Pipeline
+          metadata:
+            name: instance-configure
+          spec:
+            containers:
+              - image: ghcr.io/syntasso/kratix-marketplace/redis-configure-pipeline:v0.1.0
+                name: redis-configure-pipeline
+              - image: busybox
+                name: sleep
+                command: ["sleep", "14"]
+    promise:
+      configure:
+        - apiVersion: platform.kratix.io/v1alpha1
+          kind: Pipeline
+          metadata:
+            name: promise-configure
+          spec:
+            containers:
+              - image: ghcr.io/syntasso/kratix-marketplace/redis-configure-pipeline:v0.1.0
+                name: redis-configure-pipeline
+status: {}

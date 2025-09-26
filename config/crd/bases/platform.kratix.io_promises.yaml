@@ -94,6 +94,52 @@ spec:
                       type: string
                   type: object
                 type: array
+              upgradeStrategy:
+                description: How to roll upgrades across existing Resources.
+                properties:
+                  waves:
+                    description: Waves are evaluated in order against the remaining
+                      set. Overlaps are allowed.
+                    items:
+                      properties:
+                        name:
+                          description: Optional label for humans
+                          type: string
+                        select:
+                          description: Required selector for this wave
+                          properties:
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: Resource label selector
+                              type: object
+                            names:
+                              items:
+                                type: string
+                              type: array
+                            namespaceSelector:
+                              description: Optional namespace selector by labels
+                              properties:
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                              type: object
+                            namespaces:
+                              description: Optional namespace filter as explicit names
+                              items:
+                                type: string
+                              type: array
+                            remainder:
+                              description: Select everything not matched by previous
+                                waves
+                              type: boolean
+                          type: object
+                      required:
+                      - select
+                      type: object
+                    type: array
+                type: object
               workflows:
                 description: A list of pipelines to be executed at different stages
                   of the Promise lifecycle.

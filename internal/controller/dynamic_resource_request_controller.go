@@ -538,6 +538,7 @@ func (r *DynamicResourceRequestController) manualReconciliationLabelSet(rr *unst
 
 func (r *DynamicResourceRequestController) updateManualReconciliationLabel(ctx context.Context, rr *unstructured.Unstructured) (ctrl.Result, error) {
 	resourceLabels := rr.GetLabels()
+	r.Log.Info("=== Forcing reconciliation by setting manualReconciliationLabel to true ===")
 	resourceLabels[resourceutil.ManualReconciliationLabel] = "true"
 	rr.SetLabels(resourceLabels)
 

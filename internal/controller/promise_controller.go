@@ -116,7 +116,7 @@ var (
 	slowRequeue    = ctrl.Result{RequeueAfter: 60 * time.Second}
 )
 
-// +kubebuilder:rbac:groups=platform.kratix.io,resources=promises,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=platform.kratix.io,resources=promises;compoundrequestmetadata,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=platform.kratix.io,resources=promises/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.kratix.io,resources=promises/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=create;update;list;watch;delete

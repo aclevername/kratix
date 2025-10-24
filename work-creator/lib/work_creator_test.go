@@ -1,7 +1,10 @@
 package lib_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -14,6 +17,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -229,6 +233,71 @@ var _ = Describe("WorkCreator", func() {
 
 			It("creates works with the namespace 'kratix-platform-system'", func() {
 				getWork(expectedNamespace, promiseName, resourceName, pipelineName)
+			})
+		})
+
+		When("compound requests are present", func() {
+			var (
+				compoundWork          v1alpha1.Work
+				compoundPipelineName  string
+				mockPipelineDirectory string
+			)
+
+			BeforeEach(func() {
+				compoundPipelineName = pipelineName + "-compound-requests"
+				mockPipelineDirectory = filepath.Join(getRootDirectory(), "compound-requests")
+
+				err := workCreator.Execute(mockPipelineDirectory, promiseName, expectedNamespace, resourceName, "", "resource", pipelineName)
+				Expect(err).NotTo(HaveOccurred())
+
+				compoundWork = getWork(expectedNamespace, promiseName, resourceName, compoundPipelineName)
+			})
+
+			It("creates a work scheduled to the platform cluster", func() {
+				Expect(compoundWork.Spec.WorkloadGroups).To(HaveLen(1))
+
+				group := compoundWork.Spec.WorkloadGroups[0]
+				Expect(group.Directory).To(Equal("compound-requests"))
+				Expect(group.DestinationSelectors).To(ConsistOf(
+					v1alpha1.WorkloadGroupScheduling{
+						MatchLabels: map[string]string{"environment": "platform"},
+						Source:      "compound-requests",
+					},
+				))
+
+				var paths []string
+				for _, workload := range group.Workloads {
+					paths = append(paths, workload.Filepath)
+				}
+				Expect(paths).To(ConsistOf("application.yaml", "nested/service.yaml"))
+			})
+
+			It("labels each resource with the generation from the object file", func() {
+				group := compoundWork.Spec.WorkloadGroups[0]
+				for _, workload := range group.Workloads {
+					decompressed, err := compression.DecompressContent([]byte(workload.Content))
+					Expect(err).NotTo(HaveOccurred())
+
+					decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(decompressed), 2048)
+					for {
+						var document map[string]interface{}
+						err := decoder.Decode(&document)
+						if errors.Is(err, io.EOF) {
+							break
+						}
+						Expect(err).NotTo(HaveOccurred())
+						if len(document) == 0 {
+							continue
+						}
+
+						metadata, ok := document["metadata"].(map[string]interface{})
+						Expect(ok).To(BeTrue())
+
+						labelsMap, ok := metadata["labels"].(map[string]interface{})
+						Expect(ok).To(BeTrue())
+						Expect(labelsMap["kratix.io/generation"]).To(Equal("42"))
+					}
+				}
 			})
 		})
 

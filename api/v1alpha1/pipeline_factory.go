@@ -149,11 +149,13 @@ func (p *PipelineFactory) defaultPipelineVolumes() ([]corev1.Volume, []corev1.Vo
 		{Name: "shared-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "shared-output", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "shared-metadata", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: "shared-compound", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
 	volumeMounts := []corev1.VolumeMount{
 		{MountPath: "/kratix/input", Name: "shared-input", ReadOnly: true},
 		{MountPath: "/kratix/output", Name: "shared-output"},
 		{MountPath: "/kratix/metadata", Name: "shared-metadata"},
+		{MountPath: "/kratix/compound-requests", Name: "shared-compound"},
 	}
 	return volumes, volumeMounts
 }
@@ -247,7 +249,9 @@ func (p *PipelineFactory) workCreatorContainer() corev1.Container {
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{MountPath: "/work-creator-files/input", Name: "shared-output"},
+			{MountPath: "/work-creator-files/res", Name: "shared-input"},
 			{MountPath: "/work-creator-files/metadata", Name: "shared-metadata"},
+			{MountPath: "/work-creator-files/compound-requests", Name: "shared-compound"},
 			{MountPath: "/work-creator-files/kratix-system", Name: "promise-scheduling"}, // this volumemount is a configmap
 		},
 		SecurityContext: kratixSecurityContext,
@@ -502,7 +506,7 @@ func (p *PipelineFactory) role() ([]rbacv1.Role, error) {
 			},
 			Rules: append(rules, rbacv1.PolicyRule{
 				APIGroups: []string{GroupVersion.Group},
-				Resources: []string{"works"},
+				Resources: []string{"works", "compoundrequestmetadata"},
 				Verbs:     []string{"*"},
 			}),
 		})
@@ -600,10 +604,12 @@ func (p *PipelineFactory) roleBindings(
 
 func (p *PipelineFactory) clusterRole() ([]rbacv1.ClusterRole, error) {
 	var clusterRoles []rbacv1.ClusterRole
+	var name string
 	if !p.ResourceWorkflow {
+		name = p.ID
 		clusterRoles = append(clusterRoles, rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   p.ID,
+				Name:   name,
 				Labels: promiseNameLabel(p.Promise.GetName()),
 			},
 			TypeMeta: metav1.TypeMeta{
@@ -613,7 +619,7 @@ func (p *PipelineFactory) clusterRole() ([]rbacv1.ClusterRole, error) {
 			Rules: []rbacv1.PolicyRule{
 				{
 					APIGroups: []string{GroupVersion.Group},
-					Resources: []string{PromisePlural, PromisePlural + "/status", "works"},
+					Resources: []string{PromisePlural, PromisePlural + "/status", "works", "compoundrequestmetadata"},
 					Verbs:     []string{"get", "list", "update", "create", "patch"},
 				},
 			},
@@ -621,13 +627,14 @@ func (p *PipelineFactory) clusterRole() ([]rbacv1.ClusterRole, error) {
 	}
 
 	if p.ResourceWorkflow && p.Namespace != p.ResourceRequest.GetNamespace() {
+		name = fmt.Sprintf("%s-%s", p.ID, p.ResourceRequest.GetNamespace())
 		rules, err := p.resourcePolicyRule()
 		if err != nil {
 			return nil, err
 		}
 		clusterRoles = append(clusterRoles, rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   fmt.Sprintf("%s-%s", p.ID, p.ResourceRequest.GetNamespace()),
+				Name:   name,
 				Labels: promiseNameLabel(p.Promise.GetName()),
 			},
 			TypeMeta: metav1.TypeMeta{

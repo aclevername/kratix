@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: compound-service
+spec:
+  selector:
+    app: compound
+  ports:
+  - port: 80
+    targetPort: 8080

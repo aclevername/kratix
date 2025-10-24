@@ -25,6 +25,7 @@ import (
 )
 
 type Opts struct {
+	PromiseName  string
 	ctx          context.Context
 	client       client.Client
 	logger       logr.Logger
@@ -189,6 +190,63 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 	pipeline := opts.Resources[pipelineIndex]
 	isManualReconciliation := isManualReconciliation(opts.parentObject.GetLabels())
 	opts.logger = originalLogger.WithName(pipeline.Name).WithValues("isManualReconciliation", isManualReconciliation)
+
+	if pipelineIndex > 0 {
+		logging.Info(opts.logger, "checking if any compound resource need to be healthy before proceeding with this pipeline")
+		compoundRequestMetadata := v1alpha1.CompoundRequestMetadata{}
+
+		promiseName := opts.parentObject.GetName()
+		if strings.HasPrefix(opts.workflowType, string(v1alpha1.WorkflowTypeResource)) {
+			promiseName = opts.parentObject.GetLabels()[v1alpha1.PromiseNameLabel]
+		}
+
+		name := fmt.Sprintf("%s-%s-%s", promiseName, opts.parentObject.GetName(), opts.Resources[pipelineIndex-1].Name)
+		logging.Info(opts.logger, "getting compound request metadata", "name", name, "namespace", opts.parentObject.GetNamespace())
+		err := opts.client.Get(opts.ctx, client.ObjectKey{
+			Namespace: opts.parentObject.GetNamespace(),
+			Name:      name,
+		}, &compoundRequestMetadata)
+
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				return false, fmt.Errorf("error getting compound request metadata: %w", err)
+			}
+		} else {
+			for _, compoundResource := range compoundRequestMetadata.Spec.Resources {
+				unstructuredResource := &unstructured.Unstructured{}
+				kind := compoundResource.Kind
+				apiVersion := compoundResource.APIVersion
+				unstructuredResource.SetKind(kind)
+				unstructuredResource.SetAPIVersion(apiVersion)
+				err := opts.client.Get(opts.ctx, client.ObjectKey{
+					Namespace: compoundResource.Namespace,
+					Name:      compoundResource.Name,
+				}, unstructuredResource)
+				if err != nil {
+					if errors.IsNotFound(err) {
+						logging.Info(opts.logger, "compound resource not found; assuming its not been reconciled yet", "name", compoundResource.Name, "namespace", compoundResource.Namespace, "kind", kind, "apiVersion", apiVersion)
+						return true, nil
+					}
+					return false, fmt.Errorf("error getting compound resource %s/%s: %w", compoundResource.Namespace, compoundResource.Name, err)
+				}
+
+				logging.Info(opts.logger, "checking compound resource matches generation", "name", compoundResource.Name, "namespace", compoundResource.Namespace, "kind", kind, "apiVersion", apiVersion, "observedGeneration", unstructuredResource.GetGeneration())
+				label := "kratix.io/generation"
+				generationStr, exists := unstructuredResource.GetLabels()[label]
+				if !exists {
+					logging.Info(opts.logger, "compound resource does not have generation label; assuming its not been reconciled yet", "name", compoundResource.Name, "namespace", compoundResource.Namespace, "kind", kind, "apiVersion", apiVersion)
+					return true, nil
+				}
+				parentGenerationStr := fmt.Sprintf("%d", opts.parentObject.GetGeneration())
+				if generationStr != parentGenerationStr {
+					logging.Info(opts.logger, "compound resource generation does not match; waiting for reconciliation", "name", compoundResource.Name, "namespace", compoundResource.Namespace, "kind", kind, "apiVersion", apiVersion, "expectedGeneration", parentGenerationStr, "actualGeneration", generationStr)
+					return true, nil
+				}
+
+				logging.Info(opts.logger, "compound resource generation matches; proceeding with pipeline", "name", compoundResource.Name, "namespace", compoundResource.Namespace, "kind", kind, "apiVersion", apiVersion)
+			}
+		}
+	}
 
 	if jobIsForPipeline(pipeline, mostRecentJob) {
 		logging.Trace(opts.logger, "checking if job is for pipeline", "job", mostRecentJob.Name, "pipeline", pipeline.Name)

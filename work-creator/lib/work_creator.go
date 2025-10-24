@@ -35,7 +35,7 @@ type WorkCreator struct {
 	K8sClient client.Client
 }
 
-func buildWorkIdentifier(promiseName, resourceName, resourceNamespace, pipelineName, workflowType string) string {
+func BuildWorkIdentifier(promiseName, resourceName, resourceNamespace, pipelineName, workflowType string) string {
 	if !strings.HasPrefix(workflowType, string(v1alpha1.WorkflowTypeResource)) {
 		return fmt.Sprintf("%s-%s", promiseName, pipelineName)
 	}
@@ -63,7 +63,7 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 	}()
 	ctx = extractedCtx
 
-	identifier := buildWorkIdentifier(promiseName, resourceName, resourceNamespace, pipelineName, workflowType)
+	identifier := BuildWorkIdentifier(promiseName, resourceName, resourceNamespace, pipelineName, workflowType)
 	if namespace == "" {
 		namespace = "kratix-platform-system"
 	}
@@ -225,21 +225,22 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 			return err
 		}
 		logger.Info("Work created", "workName", work.Name)
-		return nil
+	} else {
+		logger.Info("Work already exists, will update")
+		currentWork.Spec = work.Spec
+		currentWork.SetAnnotations(telemetry.ApplyTraceAnnotations(currentWork.GetAnnotations(), traceParent, traceState))
+		err = w.K8sClient.Update(ctx, currentWork)
+
+		if err != nil {
+			logger.Error(err, "Error updating Work")
+			return err
+		}
+
+		logger.Info("Work updated", "workName", currentWork.Name)
 	}
 
-	logger.Info("Work already exists, will update")
-	currentWork.Spec = work.Spec
-	currentWork.SetAnnotations(telemetry.ApplyTraceAnnotations(currentWork.GetAnnotations(), traceParent, traceState))
-	err = w.K8sClient.Update(ctx, currentWork)
-
-	if err != nil {
-		logger.Error(err, "Error updating Work")
-		return err
-	}
-
-	logger.Info("Work updated", "workName", currentWork.Name)
-	return nil
+	logger.Info("Creating compound requests...")
+	return w.createCompoundRequestsWork(ctx, rootDirectory, promiseName, namespace, resourceName, resourceNamespace, workflowType, pipelineName, traceParent, traceState, logger)
 }
 
 // /kratix/output/     /kratix/output/   "bar"

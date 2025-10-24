@@ -220,8 +220,13 @@ func (r *DynamicResourceRequestController) Reconcile(ctx context.Context, req ct
 	)
 
 	abort, err := reconcileConfigure(jobOpts)
-	if err != nil || abort {
+	if err != nil {
 		return ctrl.Result{}, err
+	}
+
+	if abort {
+		logging.Info(logger, "aborting reconciliation as configure workflow is still in progress")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	if rr.GetGeneration() != resourceutil.GetObservedGeneration(rr) {

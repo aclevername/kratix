@@ -1,0 +1,7 @@
+apiVersion: example.kratix.io/v1
+kind: Compound
+metadata:
+  name: compound-sample
+  generation: 42
+spec:
+  description: Sample compound request

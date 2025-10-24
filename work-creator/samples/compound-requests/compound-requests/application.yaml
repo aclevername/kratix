@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compound-deployment
+  labels:
+    app: compound
+spec:
+  selector:
+    matchLabels:
+      app: compound
+  template:
+    metadata:
+      labels:
+        app: compound
+    spec:
+      containers:
+      - name: compound
+        image: nginx:1.25
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compound-config
+  labels:
+    existing: label
+data:
+  example: value

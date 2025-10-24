@@ -68,6 +68,7 @@ rules:
   - platform.kratix.io
   resources:
   - bucketstatestores
+  - compoundrequestmetadata
   - destinations
   - gitstatestores
   - healthrecords

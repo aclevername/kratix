@@ -97,8 +97,35 @@ var (
 	DefaultJobBackoffLimit                       *int32
 )
 
-// PipelineSpec defines the desired state of Pipeline.
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// Pipeline is the Schema for the pipelines API
+type Pipeline struct {
+	metav1.TypeMeta `json:",inline"`
+
+	// metadata is a standard object metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
+
+	// spec defines the desired state of Pipeline
+	// +required
+	Spec PipelineSpec `json:"spec"`
+
+	// status defines the observed state of Pipeline
+	// +optional
+	Status PipelineStatus `json:"status,omitempty,omitzero"`
+}
+
+type PipelineStatus struct {
+	// The status of each condition is one of True, False, or Unknown.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
 type PipelineSpec struct {
+	OwnerRef         OwnerReference                `json:"ownerRef,omitempty"`
 	Containers       []Container                   `json:"containers,omitempty"`
 	Volumes          []corev1.Volume               `json:"volumes,omitempty"`
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
@@ -106,6 +133,15 @@ type PipelineSpec struct {
 	JobOptions       JobOptions                    `json:"jobOptions,omitempty"`
 	NodeSelector     map[string]string             `json:"nodeSelector,omitempty"`
 	Tolerations      []corev1.Toleration           `json:"tolerations,omitempty"`
+}
+
+type OwnerReference struct {
+	Group       string `json:"group,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+	PromiseName string `json:"promiseName,omitempty"`
 }
 
 type RBAC struct {
@@ -135,14 +171,17 @@ type Container struct {
 	Resources       *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// Pipeline is the Schema for the pipelines API.
-type Pipeline struct {
-	//Note: not using TypeMeta in order to stop the CRD generation.
-	//		This is only for internal Kratix use.
-	Kind              string `json:"kind,omitempty" protobuf:"bytes,1,opt,name=kind"`
-	APIVersion        string `json:"apiVersion,omitempty" protobuf:"bytes,2,opt,name=apiVersion"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              PipelineSpec `json:"spec,omitempty"`
+// +kubebuilder:object:root=true
+
+// PipelineList contains a list of Pipeline
+type PipelineList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Pipeline `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&Pipeline{}, &PipelineList{})
 }
 
 // +kubebuilder:object:generate=false

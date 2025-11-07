@@ -386,8 +386,9 @@ func main() {
 			os.Exit(1)
 		}
 		if err := (&controller.PipelineReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
+			Client:        mgr.GetClient(),
+			Scheme:        mgr.GetScheme(),
+			EventRecorder: mgr.GetEventRecorderFor("PipelineController"),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 			os.Exit(1)

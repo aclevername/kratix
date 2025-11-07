@@ -122,7 +122,7 @@ func createDeletePipeline(opts Opts, pipeline v1alpha1.PipelineJobResources) (ab
 	return true, nil
 }
 
-func ReconcileConfigure(opts Opts) (abort bool, err error) {
+func ReconcileConfigure(opts Opts) (abort, done bool, err error) {
 	var pipelineIndex = 0
 	var mostRecentJob *batchv1.Job
 
@@ -130,14 +130,14 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 	allJobs, err := getJobsWithLabels(opts, labelsForJobs(opts), opts.namespace)
 	if err != nil {
 		logging.Error(opts.logger, err, "failed to list jobs")
-		return false, err
+		return false, false, err
 	}
 
 	// TODO: this part will be deprecated when we stop using the legacy labels
 	allLegacyJobs, err := getJobsWithLabels(opts, legacyLabelsForJobs(opts), opts.namespace)
 	if err != nil {
 		logging.Error(opts.logger, err, "failed to list jobs")
-		return false, err
+		return false, false, err
 	}
 	allJobs = append(allJobs, allLegacyJobs...)
 
@@ -163,7 +163,7 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 			resourceutil.SetStatus(opts.parentObject, opts.logger, "workflowsSucceeded", int64(pipelineIndex))
 			if err = opts.client.Status().Update(opts.ctx, opts.parentObject); err != nil {
 				logging.Error(opts.logger, err, "failed to update parent object status")
-				return false, err
+				return false, false, err
 			}
 		}
 	}
@@ -176,7 +176,7 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 
 	if pipelineIndex < 0 {
 		logging.Debug(opts.logger, "no pipeline to reconcile")
-		return false, nil
+		return false, true, nil
 	}
 
 	var mostRecentJobName = "n/a"
@@ -198,11 +198,11 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 				if err = suspendJob(opts.ctx, opts.client, mostRecentJob); err != nil {
 					logging.Error(opts.logger, err, "failed to suspend job", "job", mostRecentJob.GetName())
 				}
-				return true, err
+				return true, false, err
 			}
 
 			logging.Debug(opts.logger, "job already inflight for pipeline; waiting for completion", "job", mostRecentJob.Name, "pipeline", pipeline.Name)
-			return true, nil
+			return true, false, nil
 		}
 
 		if isManualReconciliation {
@@ -214,7 +214,7 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 			return setFailedConditionAndEvents(opts, mostRecentJob, pipeline)
 		}
 
-		return false, cleanup(opts, opts.namespace)
+		return false, false, cleanup(opts, opts.namespace)
 	}
 
 	if isRunning(mostRecentJob) {
@@ -223,26 +223,26 @@ func ReconcileConfigure(opts Opts) (abort bool, err error) {
 		if err != nil {
 			logging.Error(opts.logger, err, "failed to suspend job", "job", mostRecentJob.GetName())
 		}
-		return true, nil
+		return true, false, nil
 	}
 
 	return createConfigurePipeline(opts, pipelineIndex, pipeline)
 }
 
-func setFailedConditionAndEvents(opts Opts, mostRecentJob *batchv1.Job, pipeline v1alpha1.PipelineJobResources) (bool, error) {
+func setFailedConditionAndEvents(opts Opts, mostRecentJob *batchv1.Job, pipeline v1alpha1.PipelineJobResources) (bool, bool, error) {
 	if !opts.SkipConditions {
 		resourceutil.MarkConfigureWorkflowAsFailed(opts.logger, opts.parentObject, pipeline.Name)
 		resourceutil.MarkReconciledFailing(opts.parentObject, resourceutil.ConfigureWorkflowCompletedFailedReason)
 		resourceutil.SetStatus(opts.parentObject, opts.logger, "workflowsFailed", int64(1))
 		if err := opts.client.Status().Update(opts.ctx, opts.parentObject); err != nil {
 			logging.Error(opts.logger, err, "failed to update parent object status")
-			return false, err
+			return false, false, err
 		}
 	}
 	opts.eventRecorder.Eventf(opts.parentObject, v1.EventTypeWarning,
 		resourceutil.ConfigureWorkflowCompletedFailedReason, "A %s/configure Pipeline has failed: %s", opts.workflowType, pipeline.Name)
 	logging.Warn(opts.logger, "pipeline job failed; exiting workflow", "failedJob", mostRecentJob.Name, "pipeline", pipeline.Name)
-	return true, nil
+	return true, false, nil
 }
 
 func suspendJob(ctx context.Context, c client.Client, job *batchv1.Job) error {
@@ -438,23 +438,23 @@ func cleanupJobs(opts Opts, pipelineJobsAtCurrentSpec []batchv1.Job) error {
 	return nil
 }
 
-func createConfigurePipeline(opts Opts, pipelineIndex int, resources v1alpha1.PipelineJobResources) (abort bool, err error) {
+func createConfigurePipeline(opts Opts, pipelineIndex int, resources v1alpha1.PipelineJobResources) (abort, done bool, err error) {
 	updated, err := setConfigureWorkflowCompletedConditionStatus(opts, pipelineIndex == 0, opts.parentObject)
 	if err != nil || updated {
-		return updated, err
+		return updated, false, err
 	}
 
 	logging.Info(opts.logger, "triggering pipeline", "workflowAction", resources.WorkflowAction)
 
 	var objectToDelete []client.Object
 	if objectToDelete, err = getObjectsToDelete(opts, resources); err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	logging.Trace(opts.logger, "reconciling for parent object", "parent", opts.parentObject.GetName())
 	if isManualReconciliation(opts.parentObject.GetLabels()) {
 		if err := removeManualReconciliationLabel(opts); err != nil {
-			return false, err
+			return false, false, err
 		}
 	}
 
@@ -463,7 +463,7 @@ func createConfigurePipeline(opts Opts, pipelineIndex int, resources v1alpha1.Pi
 
 	opts.eventRecorder.Eventf(opts.parentObject, "Normal", "PipelineStarted", "Configure Pipeline started: %s", resources.Name)
 
-	return true, nil
+	return true, false, nil
 }
 
 func removeManualReconciliationLabel(opts Opts) error {

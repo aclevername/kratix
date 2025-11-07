@@ -19,7 +19,12 @@ package controller
 import (
 	"context"
 
+	"github.com/syntasso/kratix/api/v1alpha1"
+	"github.com/syntasso/kratix/lib/workflow"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -28,7 +33,8 @@ import (
 // PipelineReconciler reconciles a Pipeline object
 type PipelineReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme        *runtime.Scheme
+	EventRecorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=platform.kratix.io.kratix.io,resources=pipelines,verbs=get;list;watch;create;update;patch;delete
@@ -47,7 +53,76 @@ type PipelineReconciler struct {
 func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	pipeline := v1alpha1.Pipeline{}
+	err := r.Get(ctx, req.NamespacedName, &pipeline)
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	logger := logf.FromContext(ctx).WithValues("pipeline", req.NamespacedName)
+
+	ownerRef := pipeline.Spec.OwnerRef
+
+	unstructuredRes := &unstructured.Unstructured{}
+	resources := []v1alpha1.PipelineJobResources{}
+	pipelineType := ""
+
+	promiseName := ownerRef.PromiseName
+	if ownerRef.PromiseName == "" {
+		promiseName = ownerRef.Name
+	}
+
+	promise := v1alpha1.Promise{}
+	err = r.Get(ctx, client.ObjectKey{Name: promiseName}, &promise)
+	if err != nil {
+		logger.Error(err, "failed to get promise resource for promise pipeline")
+		return ctrl.Result{}, err
+	}
+
+	if ownerRef.Kind == "Promise" {
+		pipelineType = "promise"
+		resources, err = promise.GeneratePromisePipelines(v1alpha1.WorkflowActionConfigure, logger)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		unstructuredRes, err = promise.ToUnstructured()
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		gvk := schema.GroupVersionKind{
+			Group:   ownerRef.Group,
+			Kind:    ownerRef.Kind,
+			Version: ownerRef.Version,
+		}
+		unstructuredRes.SetGroupVersionKind(gvk)
+
+		if err := r.Get(ctx, req.NamespacedName, unstructuredRes); err != nil {
+			logger.Error(err, "failed to get resource for resource pipeline")
+			return ctrl.Result{}, err
+		}
+
+		pipelineType = "resource"
+
+		resources, err = promise.GenerateResourcePipelines(v1alpha1.WorkflowActionConfigure, unstructuredRes, logger)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	jobOpts := workflow.NewOpts(ctx, r.Client, r.EventRecorder, logger, unstructuredRes, resources, pipelineType, 1, req.Namespace)
+
+	abort, err := reconcileConfigure(jobOpts)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if abort {
+		return ctrl.Result{}, nil
+	}
 
 	return ctrl.Result{}, nil
 }

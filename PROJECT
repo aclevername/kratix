@@ -113,4 +113,9 @@ resources:
   kind: PromiseRevision
   path: github.com/syntasso/kratix/api/v1alpha1
   version: v1alpha1
+- controller: true
+  domain: kratix.io
+  group: platform.kratix.io
+  kind: Pipeline
+  version: v1alpha1
 version: "3"

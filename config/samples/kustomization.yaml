@@ -1,4 +1,5 @@
 ## Append samples of your project ##
 resources:
 - platform_v1alpha1_promiserevision.yaml
+- platform.kratix.io_v1alpha1_pipeline.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

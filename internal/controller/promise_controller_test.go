@@ -10,12 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kubernetes-sigs/kro/pkg/dynamiccontroller"
 	"github.com/syntasso/kratix/internal/controller"
-	"github.com/syntasso/kratix/internal/controller/controllerfakes"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	controllerConfig "sigs.k8s.io/controller-runtime/pkg/config"
 
-	"github.com/syntasso/kratix/internal/ptr"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
 
@@ -42,6 +40,21 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
+type fakeDynamicController struct {
+	registerCalls   []schema.GroupVersionResource
+	deregisterCalls []schema.GroupVersionResource
+}
+
+func (f *fakeDynamicController) Register(ctx context.Context, parent schema.GroupVersionResource, _ dynamiccontroller.Handler, _ ...schema.GroupVersionResource) error {
+	f.registerCalls = append(f.registerCalls, parent)
+	return nil
+}
+
+func (f *fakeDynamicController) Deregister(ctx context.Context, parent schema.GroupVersionResource) error {
+	f.deregisterCalls = append(f.deregisterCalls, parent)
+	return nil
+}
+
 // TODO: make this scoped to the test instead of to the entire suite
 var (
 	ctx                  context.Context
@@ -54,7 +67,6 @@ var (
 	promiseResourceName string
 	expectedCRDName     string
 	promiseCommonLabels map[string]string
-	managerRestarted    bool
 	l                   logr.Logger
 	eventRecorder       *record.FakeRecorder
 )
@@ -64,22 +76,16 @@ var _ = Describe("PromiseController", func() {
 		promiseResourceName = "redis"
 		expectedCRDName = promiseResourceName + "." + promiseGroup
 		ctx = context.Background()
-		managerRestarted = false
 		l = ctrl.Log.WithName("controllers").WithName("Promise")
-		m := &controllerfakes.FakeManager{}
-		m.GetControllerOptionsReturns(controllerConfig.Controller{
-			SkipNameValidation: ptr.True()})
 		eventRecorder = record.NewFakeRecorder(1024)
 		reconciler = &controller.PromiseReconciler{
-			Client:              fakeK8sClient,
-			ApiextensionsClient: fakeApiExtensionsClient,
-			Log:                 l,
-			Manager:             m,
-			RestartManager: func() {
-				managerRestarted = true
-			},
-			ReconciliationInterval: controller.DefaultReconciliationInterval,
-			EventRecorder:          eventRecorder,
+			Client:                  fakeK8sClient,
+			ApiextensionsClient:     fakeApiExtensionsClient,
+			Log:                     l,
+			DynamicController:       &fakeDynamicController{},
+			ReconciliationInterval:  controller.DefaultReconciliationInterval,
+			EventRecorder:           eventRecorder,
+			ResourceRequestRecorder: eventRecorder,
 		}
 	})
 
@@ -1013,7 +1019,6 @@ var _ = Describe("PromiseController", func() {
 					result, err := t.reconcileUntilCompletion(reconciler, promise, &opts{errorBudget: 5})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(ctrl.Result{}))
-					Expect(managerRestarted).To(BeTrue())
 
 					//Check they are all gone
 					Expect(fakeK8sClient.List(ctx, jobs)).To(Succeed())
@@ -1053,7 +1058,6 @@ var _ = Describe("PromiseController", func() {
 						result, err := t.reconcileUntilCompletion(reconciler, promise, &opts{errorBudget: 5})
 						Expect(err).NotTo(HaveOccurred())
 						Expect(result).To(Equal(ctrl.Result{}))
-						Expect(managerRestarted).To(BeTrue())
 						Expect(fakeK8sClient.Get(ctx, resNameNamespacedName, requestedResource)).To(MatchError(ContainSubstring("not found")))
 					})
 				})

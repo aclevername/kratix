@@ -3,6 +3,7 @@ package v1alpha1_test
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -815,20 +816,34 @@ var _ = Describe("Pipeline", func() {
 							corev1.VolumeMount{Name: "shared-metadata", MountPath: "/work-creator-files/metadata"},
 							corev1.VolumeMount{Name: "promise-scheduling", MountPath: "/work-creator-files/kratix-system"},
 						))
-						Expect(container.Env).To(ConsistOf(
-							corev1.EnvVar{
+						expectedEnvVars := []corev1.EnvVar{
+							{Name: v1alpha1.KratixActionEnvVar, Value: string(factory.WorkflowAction)},
+							{Name: v1alpha1.KratixTypeEnvVar, Value: string(factory.WorkflowType)},
+							{Name: "KRATIX_PROMISE_NAME", Value: promise.GetName()},
+							{Name: "KRATIX_PIPELINE_NAME", Value: pipeline.Name},
+							{Name: "KRATIX_OBJECT_KIND", Value: promise.GroupVersionKind().Kind},
+							{Name: "KRATIX_OBJECT_GROUP", Value: promise.GroupVersionKind().Group},
+							{Name: "KRATIX_OBJECT_VERSION", Value: promise.GroupVersionKind().Version},
+							{Name: "KRATIX_OBJECT_NAME", Value: promise.GetName()},
+							{Name: "KRATIX_OBJECT_NAMESPACE", Value: ""},
+							{Name: "KRATIX_CRD_PLURAL", Value: factory.CRDPlural},
+							{Name: "KRATIX_CLUSTER_SCOPED", Value: strconv.FormatBool(factory.ClusterScoped)},
+						}
+						traceEnvVars := []corev1.EnvVar{
+							{
 								Name: telemetry.TraceParentEnvVar,
 								ValueFrom: &corev1.EnvVarSource{
 									FieldRef: &corev1.ObjectFieldSelector{FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceParentAnnotation)},
 								},
 							},
-							corev1.EnvVar{
+							{
 								Name: telemetry.TraceStateEnvVar,
 								ValueFrom: &corev1.EnvVarSource{
 									FieldRef: &corev1.ObjectFieldSelector{FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceStateAnnotation)},
 								},
 							},
-						))
+						}
+						Expect(container.Env).To(ConsistOf(append(expectedEnvVars, traceEnvVars...)))
 					})
 
 					When("default image pull policy is set ", func() {
@@ -878,20 +893,34 @@ var _ = Describe("Pipeline", func() {
 							corev1.VolumeMount{Name: "shared-metadata", MountPath: "/work-creator-files/metadata"},
 							corev1.VolumeMount{Name: "promise-scheduling", MountPath: "/work-creator-files/kratix-system"},
 						))
-						Expect(container.Env).To(ConsistOf(
-							corev1.EnvVar{
+						expectedEnvVars := []corev1.EnvVar{
+							{Name: v1alpha1.KratixActionEnvVar, Value: string(factory.WorkflowAction)},
+							{Name: v1alpha1.KratixTypeEnvVar, Value: string(factory.WorkflowType)},
+							{Name: "KRATIX_PROMISE_NAME", Value: promise.GetName()},
+							{Name: "KRATIX_PIPELINE_NAME", Value: pipeline.Name},
+							{Name: "KRATIX_OBJECT_KIND", Value: resourceRequest.GroupVersionKind().Kind},
+							{Name: "KRATIX_OBJECT_GROUP", Value: resourceRequest.GroupVersionKind().Group},
+							{Name: "KRATIX_OBJECT_VERSION", Value: resourceRequest.GroupVersionKind().Version},
+							{Name: "KRATIX_OBJECT_NAME", Value: resourceRequest.GetName()},
+							{Name: "KRATIX_OBJECT_NAMESPACE", Value: resourceRequest.GetNamespace()},
+							{Name: "KRATIX_CRD_PLURAL", Value: factory.CRDPlural},
+							{Name: "KRATIX_CLUSTER_SCOPED", Value: strconv.FormatBool(factory.ClusterScoped)},
+						}
+						traceEnvVars := []corev1.EnvVar{
+							{
 								Name: telemetry.TraceParentEnvVar,
 								ValueFrom: &corev1.EnvVarSource{
 									FieldRef: &corev1.ObjectFieldSelector{FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceParentAnnotation)},
 								},
 							},
-							corev1.EnvVar{
+							{
 								Name: telemetry.TraceStateEnvVar,
 								ValueFrom: &corev1.EnvVarSource{
 									FieldRef: &corev1.ObjectFieldSelector{FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceStateAnnotation)},
 								},
 							},
-						))
+						}
+						Expect(container.Env).To(ConsistOf(append(expectedEnvVars, traceEnvVars...)))
 					})
 
 					When("default image pull policy is set ", func() {

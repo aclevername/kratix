@@ -24,7 +24,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -215,6 +217,10 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 		),
 	)
 
+	if dynamicLabels := dynamicControllerLabelsFromEnv(); len(dynamicLabels) > 0 {
+		work.SetLabels(labels.Merge(work.GetLabels(), dynamicLabels))
+	}
+
 	currentWork, err := resourceutil.GetWork(w.K8sClient, namespace, work.GetLabels())
 	if err != nil {
 		return err
@@ -240,6 +246,29 @@ func (w *WorkCreator) Execute(rootDirectory, promiseName, namespace, resourceNam
 
 	logger.Info("Work updated", "workName", currentWork.Name)
 	return nil
+}
+
+func dynamicControllerLabelsFromEnv() map[string]string {
+	group := os.Getenv(v1alpha1.KratixObjectGroupEnvVar)
+	version := os.Getenv(v1alpha1.KratixObjectVersionEnvVar)
+	kind := os.Getenv(v1alpha1.KratixObjectKindEnvVar)
+	name := os.Getenv(v1alpha1.KratixObjectNameEnvVar)
+	namespace := os.Getenv(v1alpha1.KratixObjectNamespaceEnvVar)
+
+	if group == "" || version == "" || kind == "" || name == "" {
+		return nil
+	}
+
+	parent := &unstructured.Unstructured{}
+	parent.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   group,
+		Version: version,
+		Kind:    kind,
+	})
+	parent.SetName(name)
+	parent.SetNamespace(namespace)
+
+	return resourceutil.DynamicControllerLabels(parent)
 }
 
 // /kratix/output/     /kratix/output/   "bar"

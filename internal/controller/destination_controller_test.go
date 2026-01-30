@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -494,21 +495,35 @@ var stateStoreSetups = map[string]StateStoreSetup{
 }
 
 func assertCanaryFilesWereCreated(fakeWriter *writersfakes.FakeStateStoreWriter) {
+	normalize := func(content string) string {
+		return strings.ReplaceAll(content, "  creationTimestamp: null\n", "")
+	}
+
 	dir, workPlacementName, workloadsToCreate, workloadsToDelete := fakeWriter.UpdateFilesArgsForCall(0)
 	ExpectWithOffset(1, dir).To(Equal(""))
 	ExpectWithOffset(1, workPlacementName).To(Equal("kratix-canary"))
-	ExpectWithOffset(1, workloadsToCreate).To(ConsistOf(v1alpha1.Workload{
+	normalizedWorkloads := make([]v1alpha1.Workload, len(workloadsToCreate))
+	for i, workload := range workloadsToCreate {
+		workload.Content = normalize(workload.Content)
+		normalizedWorkloads[i] = workload
+	}
+	ExpectWithOffset(1, normalizedWorkloads).To(ConsistOf(v1alpha1.Workload{
 		Filepath: "kratix-canary-namespace.yaml",
-		Content:  "apiVersion: v1\nkind: Namespace\nmetadata:\n  creationTimestamp: null\n  name: kratix-worker-system\nspec: {}\nstatus: {}\n",
+		Content:  normalize("apiVersion: v1\nkind: Namespace\nmetadata:\n  creationTimestamp: null\n  name: kratix-worker-system\nspec: {}\nstatus: {}\n"),
 	}))
 	ExpectWithOffset(1, workloadsToDelete).To(BeNil())
 
 	dir, workPlacementName, workloadsToCreate, workloadsToDelete = fakeWriter.UpdateFilesArgsForCall(1)
 	ExpectWithOffset(1, dir).To(Equal(""))
 	ExpectWithOffset(1, workPlacementName).To(Equal("kratix-canary"))
-	ExpectWithOffset(1, workloadsToCreate).To(ConsistOf(v1alpha1.Workload{
+	normalizedWorkloads = make([]v1alpha1.Workload, len(workloadsToCreate))
+	for i, workload := range workloadsToCreate {
+		workload.Content = normalize(workload.Content)
+		normalizedWorkloads[i] = workload
+	}
+	ExpectWithOffset(1, normalizedWorkloads).To(ConsistOf(v1alpha1.Workload{
 		Filepath: "kratix-canary-configmap.yaml",
-		Content:  "apiVersion: v1\ndata:\n  canary: this confirms your infrastructure is reading from Kratix state stores\nkind: ConfigMap\nmetadata:\n  creationTimestamp: null\n  name: kratix-info\n  namespace: kratix-worker-system\n",
+		Content:  normalize("apiVersion: v1\ndata:\n  canary: this confirms your infrastructure is reading from Kratix state stores\nkind: ConfigMap\nmetadata:\n  creationTimestamp: null\n  name: kratix-info\n  namespace: kratix-worker-system\n"),
 	}))
 	ExpectWithOffset(1, workloadsToDelete).To(BeNil())
 }

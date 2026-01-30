@@ -222,29 +222,31 @@ func (p *PipelineFactory) workCreatorContainer() corev1.Container {
 		args = append(args, "--resource-namespace", p.ResourceRequest.GetNamespace())
 	}
 
+	traceEnvVars := []corev1.EnvVar{
+		{
+			Name: telemetry.TraceParentEnvVar,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceParentAnnotation),
+				},
+			},
+		},
+		{
+			Name: telemetry.TraceStateEnvVar,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceStateAnnotation),
+				},
+			},
+		},
+	}
+
 	return corev1.Container{
 		Name:    "work-writer",
 		Image:   os.Getenv("PIPELINE_ADAPTER_IMG"),
 		Command: []string{"/bin/pipeline-adapter"},
 		Args:    args,
-		Env: []corev1.EnvVar{
-			{
-				Name: telemetry.TraceParentEnvVar,
-				ValueFrom: &corev1.EnvVarSource{
-					FieldRef: &corev1.ObjectFieldSelector{
-						FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceParentAnnotation),
-					},
-				},
-			},
-			{
-				Name: telemetry.TraceStateEnvVar,
-				ValueFrom: &corev1.EnvVarSource{
-					FieldRef: &corev1.ObjectFieldSelector{
-						FieldPath: fmt.Sprintf("metadata.annotations['%s']", telemetry.TraceStateAnnotation),
-					},
-				},
-			},
-		},
+		Env:     append(p.defaultEnvVars(), traceEnvVars...),
 		VolumeMounts: []corev1.VolumeMount{
 			{MountPath: "/work-creator-files/input", Name: "shared-output"},
 			{MountPath: "/work-creator-files/metadata", Name: "shared-metadata"},

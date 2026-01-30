@@ -271,6 +271,7 @@ func labelsForJobs(opts Opts) map[string]string {
 		}
 	}
 	l[v1alpha1.PromiseNameLabel] = promiseName
+
 	return l
 }
 
@@ -559,6 +560,10 @@ func applyResources(opts Opts, resources ...client.Object) {
 		logger := opts.logger.WithValues("type", reflect.TypeOf(resource), "gvk", resource.GetObjectKind().GroupVersionKind().String(), "name", resource.GetName(), "namespace", resource.GetNamespace(), "labels", resource.GetLabels())
 
 		logging.Debug(logger, "reconciling resource")
+		if job, ok := resource.(*batchv1.Job); ok {
+			job.SetLabels(labels.Merge(job.GetLabels(), resourceutil.DynamicControllerLabels(opts.parentObject)))
+		}
+		resource.SetResourceVersion("")
 		if err := opts.client.Create(opts.ctx, resource); err != nil {
 			if errors.IsAlreadyExists(err) {
 				if resource.GetObjectKind().GroupVersionKind().Kind == rbacv1.ServiceAccountKind {

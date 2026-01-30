@@ -823,6 +823,9 @@ func getPromiseRevisionToUse(ctx context.Context, rr *unstructured.Unstructured,
 func resourceBindingLabels(rr *unstructured.Unstructured, promise *v1alpha1.Promise) map[string]string {
 	l := promise.GenerateSharedLabels()
 	l[v1alpha1.ResourceNameLabel] = rr.GetName()
+	for k, v := range resourceutil.DynamicControllerLabels(rr) {
+		l[k] = v
+	}
 	return l
 }
 

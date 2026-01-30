@@ -25,16 +25,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/syntasso/kratix/lib/objectutil"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	"github.com/go-logr/logr"
+	"github.com/kubernetes-sigs/kro/pkg/dynamiccontroller"
+	"github.com/kubernetes-sigs/kro/pkg/requeue"
 	"github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/internal/logging"
+	"github.com/syntasso/kratix/lib/objectutil"
 	"github.com/syntasso/kratix/lib/resourceutil"
 	"github.com/syntasso/kratix/lib/workflow"
 	"go.opentelemetry.io/otel/attribute"
@@ -58,15 +54,17 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	kmanager "sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 var reconcileConfigure = workflow.ReconcileConfigure
 var reconcileDelete = workflow.ReconcileDelete
 
-//counterfeiter:generate . Manager
-type Manager interface {
-	kmanager.Manager
+type DynamicController interface {
+	Register(ctx context.Context, parent schema.GroupVersionResource, instanceHandler dynamiccontroller.Handler, resourceGVRsToWatch ...schema.GroupVersionResource) error
+	Deregister(ctx context.Context, parent schema.GroupVersionResource) error
 }
 
 // PromiseReconciler reconciles a Promise object.
@@ -75,12 +73,12 @@ type PromiseReconciler struct {
 	Client                    client.Client
 	ApiextensionsClient       apiextensionsv1cs.CustomResourceDefinitionsGetter
 	Log                       logr.Logger
-	Manager                   ctrl.Manager
 	StartedDynamicControllers map[string]*DynamicResourceRequestController
-	RestartManager            func()
+	DynamicController         DynamicController
 	NumberOfJobsToKeep        int
 	ReconciliationInterval    time.Duration
 	EventRecorder             record.EventRecorder
+	ResourceRequestRecorder   record.EventRecorder
 	PromiseUpgrade            bool
 }
 
@@ -280,7 +278,7 @@ func (r *PromiseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 			}
 		}
 
-		if err = r.ensureDynamicControllerIsStarted(promise, rrCRD, rrGVK, &dynamicControllerCanCreateResources, logger); err != nil {
+		if err = r.ensureDynamicControllerIsStarted(ctx, promise, rrCRD, rrGVK, &dynamicControllerCanCreateResources, logger); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -903,26 +901,21 @@ func (r *PromiseReconciler) reconcileAllRRs(ctx context.Context, rrGVK *schema.G
 	return nil
 }
 
-func (r *PromiseReconciler) ensureDynamicControllerIsStarted(promise *v1alpha1.Promise, rrCRD *apiextensionsv1.CustomResourceDefinition, rrGVK *schema.GroupVersionKind, canCreateResources *bool, logger logr.Logger) error {
-	// The Dynamic Controller needs to be started once and only once.
-	if r.dynamicControllerHasAlreadyStarted(promise, logger) {
-		logging.Debug(logger, "dynamic controller already started; ensuring configuration is current")
-
-		dynamicController := r.StartedDynamicControllers[promise.GetDynamicControllerName(logger)]
-		dynamicController.GVK = rrGVK
-		dynamicController.CRD = rrCRD
-
-		dynamicController.CanCreateResources = canCreateResources
-
-		dynamicController.PromiseDestinationSelectors = promise.Spec.DestinationSelectors
-
-		return nil
+func (r *PromiseReconciler) ensureDynamicControllerIsStarted(ctx context.Context, promise *v1alpha1.Promise, rrCRD *apiextensionsv1.CustomResourceDefinition, rrGVK *schema.GroupVersionKind, canCreateResources *bool, logger logr.Logger) error {
+	if r.DynamicController == nil {
+		return fmt.Errorf("dynamic controller not configured")
 	}
+
+	rrGVR := rrGVRFromCRD(rrCRD, rrGVK)
+	childGVRs := dynamicControllerChildGVRs()
+
 	logging.Info(logger, "starting dynamic controller")
 
-	//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
-	//once resolved, delete dynamic controller rather than disable
 	enabled := true
+	recorder := r.ResourceRequestRecorder
+	if recorder == nil {
+		recorder = r.EventRecorder
+	}
 	dynamicResourceRequestController := &DynamicResourceRequestController{
 		Client:                      r.Client,
 		Scheme:                      r.Scheme,
@@ -936,102 +929,55 @@ func (r *PromiseReconciler) ensureDynamicControllerIsStarted(promise *v1alpha1.P
 		CanCreateResources:          canCreateResources,
 		NumberOfJobsToKeep:          r.NumberOfJobsToKeep,
 		ReconciliationInterval:      r.ReconciliationInterval,
-		EventRecorder:               r.Manager.GetEventRecorderFor("ResourceRequestController"),
+		EventRecorder:               recorder,
 		PromiseUpgrade:              r.PromiseUpgrade,
 	}
 	r.StartedDynamicControllers[promise.GetDynamicControllerName(logger)] = dynamicResourceRequestController
 
-	unstructuredCRD := &unstructured.Unstructured{}
-	unstructuredCRD.SetGroupVersionKind(*rrGVK)
-
-	return ctrl.NewControllerManagedBy(r.Manager).
-		For(unstructuredCRD).
-		Watches(
-			&batchv1.Job{},
-			handler.EnqueueRequestsFromMapFunc(r.jobEventHandler(promise)),
-			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				// Only watch Jobs that are managed by Kratix
-				labels := obj.GetLabels()
-				return labels != nil && labels[v1alpha1.ManagedByLabel] == v1alpha1.ManagedByLabelValue
-			})),
-		).
-		Watches(
-			&v1alpha1.Work{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				work := obj.(*v1alpha1.Work)
-				rrName, labelExists := work.Labels[v1alpha1.ResourceNameLabel]
-				if !labelExists || work.Labels[v1alpha1.PromiseNameLabel] != promise.GetName() {
-					return nil
-				}
-
-				return []reconcile.Request{{
-					NamespacedName: types.NamespacedName{
-						Namespace: work.Namespace,
-						Name:      rrName,
-					},
-				}}
-			}),
-		).
-		Watches(
-			&v1alpha1.ResourceBinding{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				resourceBinding := obj.(*v1alpha1.ResourceBinding)
-				rrName, labelExists := resourceBinding.Labels[v1alpha1.ResourceNameLabel]
-				if !labelExists || resourceBinding.Labels[v1alpha1.PromiseNameLabel] != promise.GetName() {
-					return nil
-				}
-
-				return []reconcile.Request{{
-					NamespacedName: types.NamespacedName{
-						Namespace: resourceBinding.Namespace,
-						Name:      rrName,
-					},
-				}}
-			})).
-		Complete(dynamicResourceRequestController)
+	return r.DynamicController.Register(ctx, rrGVR, r.dynamicControllerHandler(dynamicResourceRequestController), childGVRs...)
 }
 
-func (r *PromiseReconciler) dynamicControllerHasAlreadyStarted(promise *v1alpha1.Promise, logger logr.Logger) bool {
-	_, ok := r.StartedDynamicControllers[promise.GetDynamicControllerName(logger)]
-	return ok
+func (r *PromiseReconciler) dynamicControllerHandler(controller *DynamicResourceRequestController) dynamiccontroller.Handler {
+	return func(ctx context.Context, req ctrl.Request) error {
+		result, err := controller.Reconcile(ctx, req)
+		if err != nil {
+			return err
+		}
+		if result.RequeueAfter > 0 {
+			return requeue.NeededAfter(nil, result.RequeueAfter)
+		}
+		if result.Requeue {
+			return requeue.Needed(nil)
+		}
+		return nil
+	}
 }
 
-// jobEventHandler creates a handler that processes Job events and triggers reconciliation
-// of the associated resource when Jobs change status or are deleted.
-func (r *PromiseReconciler) jobEventHandler(promise *v1alpha1.Promise) handler.MapFunc {
-	return func(ctx context.Context, obj client.Object) []reconcile.Request {
-		job := obj.(*batchv1.Job)
+func rrGVRFromCRD(crd *apiextensionsv1.CustomResourceDefinition, gvk *schema.GroupVersionKind) schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    gvk.Group,
+		Version:  gvk.Version,
+		Resource: crd.Spec.Names.Plural,
+	}
+}
 
-		// Extract resource information from Job annotations
-		annotations := job.GetAnnotations()
-		resourceNamespace, hasNamespace := annotations[v1alpha1.JobResourceNamespaceAnnotation]
-		resourceName, hasName := annotations[v1alpha1.JobResourceNameAnnotation]
-		_, hasKind := annotations[v1alpha1.JobResourceKindAnnotation]
-		_, hasAPIVersion := annotations[v1alpha1.JobResourceAPIVersionAnnotation]
-
-		// Only process Jobs that have the required annotations
-		if !hasNamespace || !hasName || !hasKind || !hasAPIVersion {
-			return nil
-		}
-
-		// Check if this Job belongs to a resource managed by this promise
-		jobLabels := job.GetLabels()
-		if jobLabels == nil || jobLabels[v1alpha1.PromiseNameLabel] != promise.GetName() {
-			return nil
-		}
-
-		// Only process resource workflow Jobs (not promise workflow Jobs)
-		if jobLabels[v1alpha1.WorkflowTypeLabel] != string(v1alpha1.WorkflowTypeResource) {
-			return nil
-		}
-
-		// Create a reconcile request for the associated resource
-		return []reconcile.Request{{
-			NamespacedName: types.NamespacedName{
-				Namespace: resourceNamespace,
-				Name:      resourceName,
-			},
-		}}
+func dynamicControllerChildGVRs() []schema.GroupVersionResource {
+	return []schema.GroupVersionResource{
+		{
+			Group:    batchv1.GroupName,
+			Version:  batchv1.SchemeGroupVersion.Version,
+			Resource: "jobs",
+		},
+		{
+			Group:    v1alpha1.GroupVersion.Group,
+			Version:  v1alpha1.GroupVersion.Version,
+			Resource: "works",
+		},
+		{
+			Group:    v1alpha1.GroupVersion.Group,
+			Version:  v1alpha1.GroupVersion.Version,
+			Resource: "resourcebindings",
+		},
 	}
 }
 
@@ -1245,14 +1191,6 @@ func (r *PromiseReconciler) deletePromise(o opts, promise *v1alpha1.Promise) (ct
 		return fastRequeue, nil
 	}
 
-	//temporary fix until https://github.com/kubernetes-sigs/controller-runtime/issues/1884 is resolved
-	//once resolved, delete dynamic controller rather than disable
-	if d, exists := r.StartedDynamicControllers[promise.GetDynamicControllerName(o.logger)]; exists {
-		r.RestartManager()
-		enabled := false
-		d.Enabled = &enabled
-	}
-
 	if controllerutil.ContainsFinalizer(promise, dynamicControllerDependantResourcesCleanupFinalizer) {
 		logging.Debug(o.logger, "deleting dependent resources for finalizer", "finalizer", dynamicControllerDependantResourcesCleanupFinalizer)
 		err := r.deleteDynamicControllerAndWorkflowResources(o, promise)
@@ -1377,7 +1315,7 @@ func (r *PromiseReconciler) deleteResourceRequests(o opts, promise *v1alpha1.Pro
 	}
 
 	var canCreateResources bool
-	err = r.ensureDynamicControllerIsStarted(promise, rrCRD, rrGVK, &canCreateResources, o.logger)
+	err = r.ensureDynamicControllerIsStarted(o.ctx, promise, rrCRD, rrGVK, &canCreateResources, o.logger)
 	if err != nil {
 		return err
 	}

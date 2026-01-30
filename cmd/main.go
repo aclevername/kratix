@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kubernetes-sigs/kro/pkg/dynamiccontroller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -38,6 +39,7 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/metadata"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -149,7 +151,7 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctx, cancelManagerCtxFunc := context.WithCancel(context.Background())
+	ctx := context.Background()
 
 	prefix := os.Getenv("KRATIX_LOGGER_PREFIX")
 	if prefix != "" {
@@ -260,40 +262,49 @@ func main() {
 			os.Exit(1)
 		}
 
+		metadataClient, err := metadata.NewForConfig(config)
+		if err != nil {
+			setupLog.Error(err, "unable to create metadata client for dynamic controller")
+			os.Exit(1)
+		}
+
+		dynamicController := dynamiccontroller.NewDynamicController(
+			ctrl.Log.WithName("controllers").WithName("DynamicController"),
+			dynamiccontroller.Config{
+				Workers:         1,
+				ResyncPeriod:    10 * time.Hour,
+				QueueMaxRetries: 20,
+				MinRetryDelay:   200 * time.Millisecond,
+				MaxRetryDelay:   1000 * time.Second,
+				RateLimit:       10,
+				BurstLimit:      100,
+			},
+			metadataClient,
+			mgr.GetRESTMapper(),
+		)
+
+		if err := mgr.Add(dynamicController); err != nil {
+			setupLog.Error(err, "unable to add dynamic controller to manager")
+			os.Exit(1)
+		}
+
 		scheduler := controller.Scheduler{
 			Client:        mgr.GetClient(),
 			Log:           ctrl.Log.WithName("controllers").WithName("Scheduler"),
 			EventRecorder: mgr.GetEventRecorderFor("Scheduler"),
 		}
 
-		restartManager := false
-		restartManagerInProgress := false
 		if err = (&controller.PromiseReconciler{
-			ApiextensionsClient:    apiextensionsClient.ApiextensionsV1(),
-			Client:                 mgr.GetClient(),
-			Log:                    ctrl.Log.WithName("controllers").WithName("Promise"),
-			Manager:                mgr,
-			Scheme:                 mgr.GetScheme(),
-			NumberOfJobsToKeep:     getNumJobsToKeep(kratixConfig),
-			ReconciliationInterval: getRegularReconciliationInterval(kratixConfig),
-			EventRecorder:          mgr.GetEventRecorderFor("PromiseController"),
-			PromiseUpgrade:         promiseUpgradeEnabled(kratixConfig),
-			RestartManager: func() {
-				// This function gets called multiple times
-				// First call: restartInProgress get set to true, sleeps starts
-				// Following calls: no-op
-				// Once sleep finishes: restartInProgress set to false.
-				restartManager = true
-				if !restartManagerInProgress {
-					// start in a go routine to avoid blocking the main thread
-					go func() {
-						restartManagerInProgress = true
-						time.Sleep(time.Minute * 2)
-						restartManagerInProgress = false
-						cancelManagerCtxFunc()
-					}()
-				}
-			},
+			ApiextensionsClient:     apiextensionsClient.ApiextensionsV1(),
+			Client:                  mgr.GetClient(),
+			Log:                     ctrl.Log.WithName("controllers").WithName("Promise"),
+			Scheme:                  mgr.GetScheme(),
+			DynamicController:       dynamicController,
+			NumberOfJobsToKeep:      getNumJobsToKeep(kratixConfig),
+			ReconciliationInterval:  getRegularReconciliationInterval(kratixConfig),
+			EventRecorder:           mgr.GetEventRecorderFor("PromiseController"),
+			ResourceRequestRecorder: mgr.GetEventRecorderFor("ResourceRequestController"),
+			PromiseUpgrade:          promiseUpgradeEnabled(kratixConfig),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "Promise")
 			os.Exit(1)
@@ -414,21 +425,12 @@ func main() {
 		}
 
 		setupLog.Info("starting manager")
-		err = mgr.Start(ctx)
-		setupLog.Info("manager stopped")
-
-		if !restartManager {
-			if err != nil {
-				setupLog.Error(err, "problem running manager")
-				os.Exit(1)
-			}
-			setupLog.Info("shutting down")
-			os.Exit(0)
+		if err = mgr.Start(ctx); err != nil {
+			setupLog.Error(err, "problem running manager")
+			os.Exit(1)
 		}
-
-		setupLog.Info("restarting manager")
-		ctx, cancelManagerCtxFunc = context.WithCancel(context.Background())
-		restartManager = false
+		setupLog.Info("shutting down")
+		os.Exit(0)
 	}
 }
 

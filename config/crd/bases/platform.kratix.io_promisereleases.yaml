@@ -52,6 +52,32 @@ spec:
                 default:
                   type: http
                 properties:
+                  image:
+                    description: OCI image containing Promise manifests.
+                    type: string
+                  imagePullSecrets:
+                    description: Optional image pull secrets used by the helper Pod.
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
+                  manifestPath:
+                    default: /manifest/promise.yaml
+                    description: Path to the Promise manifest in the OCI image filesystem.
+                    type: string
                   secretRef:
                     description: |-
                       Reference a secret with credentials to access the source.
@@ -68,9 +94,20 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  serviceAccountName:
+                    description: ServiceAccount used by the helper Pod to pull private
+                      images.
+                    type: string
+                  timeoutSeconds:
+                    default: 120
+                    description: Timeout in seconds for the helper Pod execution.
+                    format: int64
+                    minimum: 1
+                    type: integer
                   type:
                     enum:
                     - http
+                    - oci
                     type: string
                   url:
                     type: string
@@ -141,6 +178,24 @@ spec:
                   - type
                   type: object
                 type: array
+              helperPodName:
+                description: HelperPodName stores the currently active OCI helper
+                  Pod name.
+                type: string
+              lastAppliedTime:
+                description: LastAppliedTime stores when resources were last installed
+                  successfully.
+                format: date-time
+                type: string
+              lastAttemptTime:
+                description: LastAttemptTime stores when reconciliation last attempted
+                  installation work.
+                format: date-time
+                type: string
+              resolvedImageID:
+                description: ResolvedImageID stores the resolved image digest from
+                  the helper Pod (if available).
+                type: string
               status:
                 type: string
             type: object

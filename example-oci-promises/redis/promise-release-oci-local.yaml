@@ -1,0 +1,11 @@
+apiVersion: platform.kratix.io/v1alpha1
+kind: PromiseRelease
+metadata:
+  name: redis
+spec:
+  version: v0.1.0
+  sourceRef:
+    type: oci
+    image: ghcr.io/syntasso/kratix-marketplace/redis-configure-pipeline:v0.1.0
+    manifestPath: /manifest/promise.yaml
+    timeoutSeconds: 120

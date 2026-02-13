@@ -25,7 +25,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const TypeHTTP = "http"
+const (
+	TypeHTTP = "http"
+	TypeOCI  = "oci"
+
+	DefaultOCIPromiseManifestPath = "/manifest/promise.yaml"
+	DefaultOCITimeoutSeconds      = int64(120)
+)
 
 // PromiseReleaseSpec defines the desired state of PromiseRelease
 type PromiseReleaseSpec struct {
@@ -35,19 +41,41 @@ type PromiseReleaseSpec struct {
 }
 
 type SourceRef struct {
-	// +kubebuilder:validation:Enum:={http}
+	// +kubebuilder:validation:Enum=http;oci
 	Type string `json:"type"`
 	URL  string `json:"url,omitempty"`
 	// Reference a secret with credentials to access the source.
 	// For more details on the secret format, see the documentation:
 	//   https://docs.kratix.io/main/reference/promises/releases#promise-release
 	SecretRef *corev1.SecretReference `json:"secretRef,omitempty"`
+
+	// OCI image containing Promise manifests.
+	Image string `json:"image,omitempty"`
+	// Path to the Promise manifest in the OCI image filesystem.
+	// +kubebuilder:default:="/manifest/promise.yaml"
+	ManifestPath string `json:"manifestPath,omitempty"`
+	// ServiceAccount used by the helper Pod to pull private images.
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// Optional image pull secrets used by the helper Pod.
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	// Timeout in seconds for the helper Pod execution.
+	// +kubebuilder:default:=120
+	// +kubebuilder:validation:Minimum=1
+	TimeoutSeconds *int64 `json:"timeoutSeconds,omitempty"`
 }
 
 // PromiseReleaseStatus defines the observed state of PromiseRelease
 type PromiseReleaseStatus struct {
-	Status     string             `json:"status,omitempty"`
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Status string `json:"status,omitempty"`
+	// HelperPodName stores the currently active OCI helper Pod name.
+	HelperPodName string `json:"helperPodName,omitempty"`
+	// LastAttemptTime stores when reconciliation last attempted installation work.
+	LastAttemptTime *metav1.Time `json:"lastAttemptTime,omitempty"`
+	// LastAppliedTime stores when resources were last installed successfully.
+	LastAppliedTime *metav1.Time `json:"lastAppliedTime,omitempty"`
+	// ResolvedImageID stores the resolved image digest from the helper Pod (if available).
+	ResolvedImageID string             `json:"resolvedImageID,omitempty"`
+	Conditions      []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true

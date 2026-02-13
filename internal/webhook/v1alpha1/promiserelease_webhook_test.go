@@ -65,6 +65,32 @@ var _ = Describe("PromiseReleaseWebhook", func() {
 		})
 	})
 
+	When("sourceRef type is oci", func() {
+		BeforeEach(func() {
+			pr.Spec.SourceRef.Type = v1alpha1.TypeOCI
+			pr.Spec.SourceRef.URL = ""
+			pr.Spec.SourceRef.Image = "ghcr.io/org/promise:v0.1.0"
+		})
+
+		It("does not fetch URL on create", func() {
+			warnings, err := validator.ValidateCreate(ctx, pr)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(warnings).To(BeEmpty())
+			Expect(promiseFetcher.FromURLCallCount()).To(Equal(0))
+		})
+
+		It("errors when image is missing", func() {
+			pr.Spec.SourceRef.Image = ""
+			warnings, err := validator.ValidateCreate(ctx, pr)
+			Expect(warnings).To(BeEmpty())
+			Expect(err).To(MatchError("sourceRef.image must be set"))
+
+			warnings, err = validator.ValidateUpdate(ctx, pr, pr)
+			Expect(warnings).To(BeEmpty())
+			Expect(err).To(MatchError("sourceRef.image must be set"))
+		})
+	})
+
 	When("fetching the URL fails", func() {
 		It("errors on create", func() {
 			promiseFetcher.FromURLReturns(p, fmt.Errorf("foo"))
@@ -106,6 +132,16 @@ var _ = Describe("PromiseReleaseWebhook", func() {
 			warnings, err := validator.ValidateCreate(ctx, pr)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(warnings).To(ConsistOf("Warning: version labels do not match, found: v0.2.0, expected: v0.1.0, installation will fail"))
+		})
+	})
+
+	When("the PromiseRelease version is blank", func() {
+		It("does not emit a version mismatch warning", func() {
+			pr.Spec.Version = ""
+			promiseFetcher.FromURLReturns(p, nil)
+			warnings, err := validator.ValidateCreate(ctx, pr)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(warnings).To(BeEmpty())
 		})
 	})
 })

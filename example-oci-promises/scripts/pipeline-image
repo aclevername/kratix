@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+set -e
+
+declare -a args=( "$@" )
+
+dirs=${PIPELINE_DIR:-"configure-pipeline configure-promise-pipeline"}
+
+for dir_name in $dirs; do
+  promise_name="$(basename "$(dirname "${PWD}")")"
+  if [ -n "${PROMISE_NAME:-""}" ]; then
+    promise_name="${PROMISE_NAME}"
+  fi
+  pipeline_dir=${dir_name}
+  if [ -n "${PIPELINE_DIR:-""}" ]; then
+    pipeline_dir="${PIPELINE_DIR}"
+  fi
+  version=v0.1.0
+  if [ -f ${PWD}/${pipeline_dir}/VERSION ]; then
+    version=$(cat ${PWD}/${pipeline_dir}/VERSION)
+  fi
+  pipeline_image="ghcr.io/syntasso/kratix-marketplace/${promise_name}-${dir_name}:${version}"
+
+  if [ -d "${PWD}/${pipeline_dir}" ]; then
+    set -- "${args[@]}"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        build)
+          docker build \
+            --tag "${pipeline_image}" \
+            --platform linux/$(uname -m) \
+            "${PWD}/${pipeline_dir}" ;;
+
+        load)
+          kind load docker-image "${pipeline_image}" --name platform ;;
+
+        push)
+          if ! docker buildx ls | grep -q "kratix-image-builder"; then \
+          	docker buildx create --name kratix-image-builder; \
+          fi;
+          platform="${BUILD_PLATFORM:-linux/arm64,linux/amd64}"
+          docker buildx build \
+            --builder kratix-image-builder \
+            --tag "${pipeline_image}" \
+            --platform $platform \
+            --push \
+            "${PWD}/${pipeline_dir}" ;;
+
+        rmi)
+          docker rmi --force "${pipeline_image}" ;;
+
+        pull)
+          docker pull "${pipeline_image}" ;;
+
+        *)
+          echo "unknown command $1"
+          exit 1
+          ;;
+      esac
+      shift
+    done
+  fi
+done

@@ -184,7 +184,7 @@ var _ = Describe("PromiseReleaseController", func() {
 						Expect(promiseRelease.Status.Conditions[0].Type).To(Equal("Installed"))
 						Expect(promiseRelease.Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
 						Expect(promiseRelease.Status.Conditions[0].Message).To(Equal("Version labels do not match, found: v2.2.0, expected: v1.1.0"))
-						Expect(promiseRelease.Status.Conditions[0].Reason).To(Equal("VersionNotMatching"))
+						Expect(promiseRelease.Status.Conditions[0].Reason).To(Equal("VersionMismatch"))
 					})
 				})
 

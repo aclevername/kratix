@@ -60,6 +60,10 @@ func (p PromiseReleaseCustomValidator) ValidateCreate(ctx context.Context, obj r
 		return nil, err
 	}
 
+	if r.Spec.SourceRef.Type == v1alpha1.TypeOCI {
+		return nil, nil
+	}
+
 	secretRefData, err := r.FetchSecretFromReference(k8sClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from secretRef: %w", err)
@@ -79,6 +83,10 @@ func (p PromiseReleaseCustomValidator) ValidateCreate(ctx context.Context, obj r
 	if !found {
 		msg := fmt.Sprintf("Warning: version label (%s) not found on promise, installation will fail", v1alpha1.PromiseVersionLabel)
 		return []string{msg}, nil
+	}
+
+	if r.Spec.Version == "" {
+		return nil, nil
 	}
 
 	if promiseVersion != r.Spec.Version {
@@ -109,8 +117,17 @@ func (p PromiseReleaseCustomValidator) ValidateDelete(ctx context.Context, obj r
 }
 
 func validate(r *v1alpha1.PromiseRelease) error {
-	if r.Spec.SourceRef.URL == "" {
-		return fmt.Errorf("sourceRef.url must be set")
+	switch r.Spec.SourceRef.Type {
+	case v1alpha1.TypeHTTP:
+		if r.Spec.SourceRef.URL == "" {
+			return fmt.Errorf("sourceRef.url must be set")
+		}
+	case v1alpha1.TypeOCI:
+		if r.Spec.SourceRef.Image == "" {
+			return fmt.Errorf("sourceRef.image must be set")
+		}
+	default:
+		return fmt.Errorf("sourceRef.type must be one of: %s, %s", v1alpha1.TypeHTTP, v1alpha1.TypeOCI)
 	}
 	return nil
 }

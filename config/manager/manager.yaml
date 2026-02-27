@@ -28,8 +28,10 @@ spec:
       - command:
         - /manager
         args:
+          - "--controllers=promise"
           - "--health-probe-bind-address=:8081"
           - "--leader-elect"
+          - "--leader-election-id=2743c979.promise.kratix.io"
         image: controller:latest
         name: manager
         securityContext:
@@ -66,5 +68,223 @@ spec:
               configMapKeyRef:
                 name: pipeline-adapter-config
                 key: PIPELINE_ADAPTER_IMG
+          - name: KRATIX_LOGGER_PREFIX
+            value: promise
+      - command:
+        - /manager
+        args:
+          - "--controllers=work"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.work.kratix.io"
+        image: controller:latest
+        name: work-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: work
+      - command:
+        - /manager
+        args:
+          - "--controllers=destination"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.destination.kratix.io"
+        image: controller:latest
+        name: destination-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: destination
+      - command:
+        - /manager
+        args:
+          - "--controllers=workplacement"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.workplacement.kratix.io"
+        image: controller:latest
+        name: workplacement-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: workplacement
+      - command:
+        - /manager
+        args:
+          - "--controllers=promiserelease"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.promiserelease.kratix.io"
+        image: controller:latest
+        name: promiserelease-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: promiserelease
+      - command:
+        - /manager
+        args:
+          - "--controllers=healthrecord"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.healthrecord.kratix.io"
+        image: controller:latest
+        name: healthrecord-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: healthrecord
+      - command:
+        - /manager
+        args:
+          - "--controllers=bucketstatestore"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.bucketstatestore.kratix.io"
+        image: controller:latest
+        name: bucketstatestore-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: bucketstatestore
+      - command:
+        - /manager
+        args:
+          - "--controllers=gitstatestore"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.gitstatestore.kratix.io"
+        image: controller:latest
+        name: gitstatestore-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: gitstatestore
+      - command:
+        - /manager
+        args:
+          - "--controllers=promiserevision"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.promiserevision.kratix.io"
+        image: controller:latest
+        name: promiserevision-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: promiserevision
+      - command:
+        - /manager
+        args:
+          - "--controllers=resourcebinding"
+          - "--metrics-bind-address=0"
+          - "--health-probe-bind-address=0"
+          - "--pprof-bind-address=0"
+          - "--webhooks-enabled=false"
+          - "--leader-elect"
+          - "--leader-election-id=2743c979.resourcebinding.kratix.io"
+        image: controller:latest
+        name: resourcebinding-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+          - name: KRATIX_LOGGER_PREFIX
+            value: resourcebinding
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

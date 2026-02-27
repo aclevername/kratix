@@ -23,6 +23,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -117,6 +118,42 @@ var probeAddr string
 var secureMetrics bool
 var pprofAddr string
 var enableLeaderElection bool
+var controllersArg string
+var enableWebhooks bool
+var webhookPort int
+var leaderElectionID string
+
+const (
+	numJobsToKeepDefault      = 5
+	allControllersName        = "all"
+	defaultLeaderElectionLock = "2743c979.kratix.io"
+
+	controllerNameBucketStateStore = "bucketstatestore"
+	controllerNameDestination      = "destination"
+	controllerNameGitStateStore    = "gitstatestore"
+	controllerNameHealthRecord     = "healthrecord"
+	controllerNamePromise          = "promise"
+	controllerNamePromiseRelease   = "promiserelease"
+	controllerNamePromiseRevision  = "promiserevision"
+	controllerNameResourceBinding  = "resourcebinding"
+	controllerNameWork             = "work"
+	controllerNameWorkPlacement    = "workplacement"
+)
+
+var supportedControllers = map[string]struct{}{
+	controllerNameBucketStateStore: {},
+	controllerNameDestination:      {},
+	controllerNameGitStateStore:    {},
+	controllerNameHealthRecord:     {},
+	controllerNamePromise:          {},
+	controllerNamePromiseRelease:   {},
+	controllerNamePromiseRevision:  {},
+	controllerNameResourceBinding:  {},
+	controllerNameWork:             {},
+	controllerNameWorkPlacement:    {},
+}
+
+type controllerSelection map[string]struct{}
 
 // wrapConfigWithOTel wraps the Kubernetes REST config's HTTP transport with OpenTelemetry
 // instrumentation to automatically trace all Kubernetes API calls.
@@ -140,6 +177,11 @@ func main() {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&pprofAddr, "pprof-bind-address", ":8082", "The address the pprof endpoint binds to.")
+	flag.StringVar(&controllersArg, "controllers", allControllersName,
+		fmt.Sprintf("Comma-separated list of controllers to start. Valid values: %s or %q", strings.Join(supportedControllerNames(), ","), allControllersName))
+	flag.BoolVar(&enableWebhooks, "webhooks-enabled", true, "Enable webhook server and webhook registrations.")
+	flag.IntVar(&webhookPort, "webhook-port", 9443, "The port used by the webhook server.")
+	flag.StringVar(&leaderElectionID, "leader-election-id", defaultLeaderElectionLock, "The resource name used for leader election locking.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -156,6 +198,16 @@ func main() {
 		ctrl.Log = ctrl.Log.WithName(prefix)
 	}
 	setupLog = ctrl.Log.WithName("setup")
+
+	selectedControllers, parseControllersErr := parseEnabledControllers(controllersArg)
+	if parseControllersErr != nil {
+		setupLog.Error(parseControllersErr, "invalid controllers selection", "controllers", controllersArg)
+		os.Exit(1)
+	}
+
+	if !enableWebhooks {
+		webhookPort = 0
+	}
 
 	kClientConfig := wrapConfigWithOTel(ctrl.GetConfigOrDie())
 	kClient, err := client.New(kClientConfig, client.Options{})
@@ -178,6 +230,11 @@ func main() {
 	}
 	setupLog = ctrl.Log.WithName("setup")
 	setupLog.Info("logging configured from Kratix config", "structured", !opts.Development, "developmentMode", opts.Development, "level", opts.Level)
+	setupLog.Info("runtime configuration",
+		"controllers", selectedControllers.names(),
+		"webhooksEnabled", enableWebhooks,
+		"webhookPort", webhookPort,
+		"leaderElectionID", leaderElectionID)
 
 	if kratixConfig != nil {
 		v1alpha1.DefaultUserProvidedContainersSecurityContext = &kratixConfig.Workflows.DefaultContainerSecurityContext
@@ -209,7 +266,7 @@ func main() {
 			SecureServing: secureMetrics,
 		}
 		webhookServer := webhook.NewServer(webhook.Options{
-			Port: 9443,
+			Port: webhookPort,
 		})
 
 		if secureMetrics {
@@ -231,7 +288,7 @@ func main() {
 			HealthProbeBindAddress: probeAddr,
 			PprofBindAddress:       pprofAddr,
 			LeaderElection:         enableLeaderElection,
-			LeaderElectionID:       "2743c979.kratix.io",
+			LeaderElectionID:       leaderElectionID,
 			Controller: controllercfg.Controller{
 				SkipNameValidation: ptr.True(),
 			},
@@ -260,157 +317,193 @@ func main() {
 			os.Exit(1)
 		}
 
-		scheduler := controller.Scheduler{
-			Client:        mgr.GetClient(),
-			Log:           ctrl.Log.WithName("controllers").WithName("Scheduler"),
-			EventRecorder: mgr.GetEventRecorderFor("Scheduler"),
+		var scheduler *controller.Scheduler
+		if selectedControllers.enabled(controllerNameWork) || selectedControllers.enabled(controllerNameDestination) {
+			scheduler = &controller.Scheduler{
+				Client:        mgr.GetClient(),
+				Log:           ctrl.Log.WithName("controllers").WithName("Scheduler"),
+				EventRecorder: mgr.GetEventRecorderFor("Scheduler"),
+			}
 		}
 
 		restartManager := false
 		restartManagerInProgress := false
-		if err = (&controller.PromiseReconciler{
-			ApiextensionsClient:    apiextensionsClient.ApiextensionsV1(),
-			Client:                 mgr.GetClient(),
-			Log:                    ctrl.Log.WithName("controllers").WithName("Promise"),
-			Manager:                mgr,
-			Scheme:                 mgr.GetScheme(),
-			NumberOfJobsToKeep:     getNumJobsToKeep(kratixConfig),
-			ReconciliationInterval: getRegularReconciliationInterval(kratixConfig),
-			EventRecorder:          mgr.GetEventRecorderFor("PromiseController"),
-			PromiseUpgrade:         promiseUpgradeEnabled(kratixConfig),
-			RestartManager: func() {
-				// This function gets called multiple times
-				// First call: restartInProgress get set to true, sleeps starts
-				// Following calls: no-op
-				// Once sleep finishes: restartInProgress set to false.
-				restartManager = true
-				if !restartManagerInProgress {
-					// start in a go routine to avoid blocking the main thread
-					go func() {
-						restartManagerInProgress = true
-						time.Sleep(time.Minute * 2)
-						restartManagerInProgress = false
-						cancelManagerCtxFunc()
-					}()
-				}
-			},
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "Promise")
-			os.Exit(1)
+		if enableWebhooks && !selectedControllers.enabled(controllerNameDestination) {
+			if err = controller.RegisterDestinationStateStoreRefIndex(mgr); err != nil {
+				setupLog.Error(err, "unable to create destination state store index for webhook")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.WorkReconciler{
-			Client:        mgr.GetClient(),
-			Log:           ctrl.Log.WithName("controllers").WithName("Work"),
-			Scheduler:     &scheduler,
-			EventRecorder: mgr.GetEventRecorderFor("WorkController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "Work")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNamePromise) {
+			if err = (&controller.PromiseReconciler{
+				ApiextensionsClient:    apiextensionsClient.ApiextensionsV1(),
+				Client:                 mgr.GetClient(),
+				Log:                    ctrl.Log.WithName("controllers").WithName("Promise"),
+				Manager:                mgr,
+				Scheme:                 mgr.GetScheme(),
+				NumberOfJobsToKeep:     getNumJobsToKeep(kratixConfig),
+				ReconciliationInterval: getRegularReconciliationInterval(kratixConfig),
+				EventRecorder:          mgr.GetEventRecorderFor("PromiseController"),
+				PromiseUpgrade:         promiseUpgradeEnabled(kratixConfig),
+				RestartManager: func() {
+					// This function gets called multiple times
+					// First call: restartInProgress get set to true, sleeps starts
+					// Following calls: no-op
+					// Once sleep finishes: restartInProgress set to false.
+					restartManager = true
+					if !restartManagerInProgress {
+						// start in a go routine to avoid blocking the main thread
+						go func() {
+							restartManagerInProgress = true
+							time.Sleep(time.Minute * 2)
+							restartManagerInProgress = false
+							cancelManagerCtxFunc()
+						}()
+					}
+				},
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "Promise")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.DestinationReconciler{
-			Client:        mgr.GetClient(),
-			Scheduler:     &scheduler,
-			Log:           ctrl.Log.WithName("controllers").WithName("DestinationController"),
-			EventRecorder: mgr.GetEventRecorderFor("DestinationController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "Destination")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameWork) {
+			if err = (&controller.WorkReconciler{
+				Client:        mgr.GetClient(),
+				Log:           ctrl.Log.WithName("controllers").WithName("Work"),
+				Scheduler:     scheduler,
+				EventRecorder: mgr.GetEventRecorderFor("WorkController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "Work")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.WorkPlacementReconciler{
-			Client:        mgr.GetClient(),
-			Log:           ctrl.Log.WithName("controllers").WithName("WorkPlacementController"),
-			VersionCache:  make(map[string]string),
-			EventRecorder: mgr.GetEventRecorderFor("WorkPlacementController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "WorkPlacement")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameDestination) {
+			if err = (&controller.DestinationReconciler{
+				Client:        mgr.GetClient(),
+				Scheduler:     scheduler,
+				Log:           ctrl.Log.WithName("controllers").WithName("DestinationController"),
+				EventRecorder: mgr.GetEventRecorderFor("DestinationController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "Destination")
+				os.Exit(1)
+			}
 		}
-		if err = kratixWebhook.SetupPromiseWebhookWithManager(mgr, apiextensionsClient, mgr.GetClient()); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "Promise")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameWorkPlacement) {
+			if err = (&controller.WorkPlacementReconciler{
+				Client:        mgr.GetClient(),
+				Log:           ctrl.Log.WithName("controllers").WithName("WorkPlacementController"),
+				VersionCache:  make(map[string]string),
+				EventRecorder: mgr.GetEventRecorderFor("WorkPlacementController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "WorkPlacement")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.PromiseReleaseReconciler{
-			Log:            ctrl.Log.WithName("controllers").WithName("PromiseReleaseController"),
-			Client:         mgr.GetClient(),
-			Scheme:         mgr.GetScheme(),
-			PromiseFetcher: &fetchers.URLFetcher{},
-			EventRecorder:  mgr.GetEventRecorderFor("PromiseReleaseController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "PromiseRelease")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNamePromiseRelease) {
+			if err = (&controller.PromiseReleaseReconciler{
+				Log:            ctrl.Log.WithName("controllers").WithName("PromiseReleaseController"),
+				Client:         mgr.GetClient(),
+				Scheme:         mgr.GetScheme(),
+				PromiseFetcher: &fetchers.URLFetcher{},
+				EventRecorder:  mgr.GetEventRecorderFor("PromiseReleaseController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "PromiseRelease")
+				os.Exit(1)
+			}
 		}
-		if err = kratixWebhook.SetupPromiseReleaseWebhookWithManager(mgr, mgr.GetClient(), &fetchers.URLFetcher{}); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "PromiseRelease")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameHealthRecord) {
+			if err = (&controller.HealthRecordReconciler{
+				Client:        mgr.GetClient(),
+				Scheme:        mgr.GetScheme(),
+				Log:           ctrl.Log.WithName("controllers").WithName("HealthRecordController"),
+				EventRecorder: mgr.GetEventRecorderFor("HealthRecordController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "HealthRecord")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.HealthRecordReconciler{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			Log:           ctrl.Log.WithName("controllers").WithName("HealthRecordController"),
-			EventRecorder: mgr.GetEventRecorderFor("HealthRecordController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "HealthRecord")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameBucketStateStore) {
+			if err = (&controller.BucketStateStoreReconciler{
+				Client:        mgr.GetClient(),
+				Scheme:        mgr.GetScheme(),
+				Log:           ctrl.Log.WithName("controllers").WithName("BucketStateStoreController"),
+				EventRecorder: mgr.GetEventRecorderFor("BucketStateStoreController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "BucketStateStore")
+				os.Exit(1)
+			}
 		}
-		if err = kratixWebhook.SetupDestinationWebhookWithManager(mgr, mgr.GetClient()); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "Destination")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameGitStateStore) {
+			if err = (&controller.GitStateStoreReconciler{
+				Client:        mgr.GetClient(),
+				Scheme:        mgr.GetScheme(),
+				Log:           ctrl.Log.WithName("controllers").WithName("GitStateStoreController"),
+				EventRecorder: mgr.GetEventRecorderFor("GitStateStoreController"),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "GitStateStore")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.BucketStateStoreReconciler{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			Log:           ctrl.Log.WithName("controllers").WithName("BucketStateStoreController"),
-			EventRecorder: mgr.GetEventRecorderFor("BucketStateStoreController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "BucketStateStore")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNamePromiseRevision) {
+			if err := (&controller.PromiseRevisionReconciler{
+				Client:         mgr.GetClient(),
+				Scheme:         mgr.GetScheme(),
+				PromiseUpgrade: promiseUpgradeEnabled(kratixConfig),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "PromiseRevision")
+				os.Exit(1)
+			}
 		}
-		if err = (&controller.GitStateStoreReconciler{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			Log:           ctrl.Log.WithName("controllers").WithName("GitStateStoreController"),
-			EventRecorder: mgr.GetEventRecorderFor("GitStateStoreController"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "GitStateStore")
-			os.Exit(1)
+		if selectedControllers.enabled(controllerNameResourceBinding) {
+			if err := (&controller.ResourceBindingReconciler{
+				Client: mgr.GetClient(),
+				Scheme: mgr.GetScheme(),
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "ResourceBinding")
+				os.Exit(1)
+			}
 		}
-		if err = kratixWebhook.SetupBucketStateStoreWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "BucketStateStore")
-			os.Exit(1)
-		}
-		if err := (&controller.PromiseRevisionReconciler{
-			Client:         mgr.GetClient(),
-			Scheme:         mgr.GetScheme(),
-			PromiseUpgrade: promiseUpgradeEnabled(kratixConfig),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "PromiseRevision")
-			os.Exit(1)
-		}
-		if err := (&controller.ResourceBindingReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "ResourceBinding")
-			os.Exit(1)
-		}
-		if err := webhookv1alpha1.SetupPromiseRevisionWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "PromiseRevision")
-			os.Exit(1)
+
+		if enableWebhooks {
+			if err = kratixWebhook.SetupPromiseWebhookWithManager(mgr, apiextensionsClient, mgr.GetClient()); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "Promise")
+				os.Exit(1)
+			}
+			if err = kratixWebhook.SetupPromiseReleaseWebhookWithManager(mgr, mgr.GetClient(), &fetchers.URLFetcher{}); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "PromiseRelease")
+				os.Exit(1)
+			}
+			if err = kratixWebhook.SetupDestinationWebhookWithManager(mgr, mgr.GetClient()); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "Destination")
+				os.Exit(1)
+			}
+			if err = kratixWebhook.SetupBucketStateStoreWebhookWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "BucketStateStore")
+				os.Exit(1)
+			}
+			if err := webhookv1alpha1.SetupPromiseRevisionWebhookWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "PromiseRevision")
+				os.Exit(1)
+			}
 		}
 
 		//+kubebuilder:scaffold:builder
 
-		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-			setupLog.Error(err, "unable to set up health check")
-			os.Exit(1)
-		}
-		if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-			setupLog.Error(err, "unable to set up ready check")
-			os.Exit(1)
-		}
-		if err := mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()); err != nil {
-			setupLog.Error(err, "unable to set up webhook ready check")
-			os.Exit(1)
+		if probeAddr != "0" {
+			if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+				setupLog.Error(err, "unable to set up health check")
+				os.Exit(1)
+			}
+			if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+				setupLog.Error(err, "unable to set up ready check")
+				os.Exit(1)
+			}
+			if enableWebhooks {
+				if err := mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker()); err != nil {
+					setupLog.Error(err, "unable to set up webhook ready check")
+					os.Exit(1)
+				}
+			}
 		}
 
 		setupLog.Info("starting manager")
@@ -431,8 +524,6 @@ func main() {
 		restartManager = false
 	}
 }
-
-const numJobsToKeepDefault = 5
 
 func readKratixConfig(logger logr.Logger, kClient client.Client) (*KratixConfig, error) {
 	cm := &corev1.ConfigMap{}
@@ -601,4 +692,63 @@ func promiseUpgradeEnabled(kConfig *KratixConfig) bool {
 		return *kConfig.FeatureFlags.PromiseUpgrade
 	}
 	return false
+}
+
+func parseEnabledControllers(raw string) (controllerSelection, error) {
+	normalized := strings.TrimSpace(strings.ToLower(raw))
+	if normalized == "" || normalized == allControllersName {
+		return allSupportedControllers(), nil
+	}
+
+	selection := make(controllerSelection, len(supportedControllers))
+	for _, controllerName := range strings.Split(normalized, ",") {
+		controllerName = strings.TrimSpace(controllerName)
+		if controllerName == "" {
+			continue
+		}
+		if controllerName == allControllersName {
+			return nil, fmt.Errorf("%q cannot be combined with other controllers", allControllersName)
+		}
+		if _, supported := supportedControllers[controllerName]; !supported {
+			return nil, fmt.Errorf("unsupported controller %q (supported: %s)", controllerName, strings.Join(supportedControllerNames(), ","))
+		}
+		selection[controllerName] = struct{}{}
+	}
+
+	if len(selection) == 0 {
+		return nil, fmt.Errorf("at least one controller must be specified")
+	}
+
+	return selection, nil
+}
+
+func (selection controllerSelection) enabled(name string) bool {
+	_, found := selection[name]
+	return found
+}
+
+func (selection controllerSelection) names() []string {
+	names := make([]string, 0, len(selection))
+	for name := range selection {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func allSupportedControllers() controllerSelection {
+	selection := make(controllerSelection, len(supportedControllers))
+	for controllerName := range supportedControllers {
+		selection[controllerName] = struct{}{}
+	}
+	return selection
+}
+
+func supportedControllerNames() []string {
+	names := make([]string, 0, len(supportedControllers))
+	for controllerName := range supportedControllers {
+		names = append(names, controllerName)
+	}
+	sort.Strings(names)
+	return names
 }

@@ -301,8 +301,10 @@ spec:
     spec:
       containers:
         - args:
+            - --controllers=promise
             - --health-probe-bind-address=:8081
             - --leader-elect
+            - --leader-election-id=2743c979.promise.kratix.io
           command:
             - /manager
           env:
@@ -311,6 +313,8 @@ spec:
                 configMapKeyRef:
                   key: PIPELINE_ADAPTER_IMG
                   name: kratix-platform-pipeline-adapter-config
+            - name: KRATIX_LOGGER_PREFIX
+              value: promise
           image: docker.io/syntasso/kratix-platform:dev
           livenessProbe:
             httpGet:
@@ -349,6 +353,222 @@ spec:
             - mountPath: /tmp/k8s-webhook-server/serving-certs
               name: cert
               readOnly: true
+        - args:
+            - --controllers=work
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.work.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: work
+          image: docker.io/syntasso/kratix-platform:dev
+          name: work-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=destination
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.destination.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: destination
+          image: docker.io/syntasso/kratix-platform:dev
+          name: destination-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=workplacement
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.workplacement.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: workplacement
+          image: docker.io/syntasso/kratix-platform:dev
+          name: workplacement-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=promiserelease
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.promiserelease.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: promiserelease
+          image: docker.io/syntasso/kratix-platform:dev
+          name: promiserelease-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=healthrecord
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.healthrecord.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: healthrecord
+          image: docker.io/syntasso/kratix-platform:dev
+          name: healthrecord-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=bucketstatestore
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.bucketstatestore.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: bucketstatestore
+          image: docker.io/syntasso/kratix-platform:dev
+          name: bucketstatestore-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=gitstatestore
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.gitstatestore.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: gitstatestore
+          image: docker.io/syntasso/kratix-platform:dev
+          name: gitstatestore-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=promiserevision
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.promiserevision.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: promiserevision
+          image: docker.io/syntasso/kratix-platform:dev
+          name: promiserevision-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        - args:
+            - --controllers=resourcebinding
+            - --metrics-bind-address=0
+            - --health-probe-bind-address=0
+            - --pprof-bind-address=0
+            - --webhooks-enabled=false
+            - --leader-elect
+            - --leader-election-id=2743c979.resourcebinding.kratix.io
+          command:
+            - /manager
+          env:
+            - name: KRATIX_LOGGER_PREFIX
+              value: resourcebinding
+          image: docker.io/syntasso/kratix-platform:dev
+          name: resourcebinding-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
       securityContext:
         runAsNonRoot: true
       serviceAccountName: kratix-platform-controller-manager

@@ -352,9 +352,12 @@ var _ = Describe("Workflow Reconciler", func() {
 
 				When("the manual reconciliation label is added", func() {
 					It("suspends the current job", func() {
-						uPromise.SetLabels(map[string]string{
-							"kratix.io/manual-reconciliation": "true",
-						})
+						labelPromiseForManualReconciliation("redis")
+						Expect(fakeK8sClient.Get(ctx, types.NamespacedName{Name: promise.Name}, &promise)).To(Succeed())
+						var err error
+						uPromise, err = promise.ToUnstructured()
+						Expect(err).NotTo(HaveOccurred())
+						opts.SetParentObject(uPromise)
 
 						By("cancelling the current job", func() {
 							requeue := reconcile(opts, &promise)
@@ -592,27 +595,16 @@ var _ = Describe("Workflow Reconciler", func() {
 					originalWorkflowPipelines, uPromise = setupTest(promise, pipelines)
 				})
 
-				Context("but the most recent job does not match the current promise spec", func() {
-					It("re-runs all pipelines in the workflow", func() {
+				Context("but newer jobs from another spec also exist", func() {
+					It("does not re-run the workflow when the current spec already has completed jobs", func() {
 						// Reconcile with the *original* pipelines and promise spec
 						opts := workflow.NewOpts(ctx, fakeK8sClient, eventRecorder, logger, uPromise, originalWorkflowPipelines, "promise", 5, namespace)
 						passiveRequeue, err := workflow.ReconcileConfigure(opts)
 						Expect(err).NotTo(HaveOccurred())
 						Expect(passiveRequeue).To(BeTrue())
 
-						// Expect the original 2 jobs, the updated 2 jobs, and the first job
-						// from re-running the first pipeline again on this reconciliation
 						jobList := listJobs(namespace)
-						Expect(jobList).To(HaveLen(5))
-
-						markJobAsComplete(originalWorkflowPipelines[0].Job.Name)
-						setParentWorkflowCountersStatus(uPromise, 1)
-
-						passiveRequeue, err = workflow.ReconcileConfigure(opts)
-						Expect(err).NotTo(HaveOccurred())
-						Expect(passiveRequeue).To(BeTrue())
-						jobList = listJobs(namespace)
-						Expect(jobList).To(HaveLen(6))
+						Expect(jobList).To(HaveLen(4))
 					})
 				})
 			})

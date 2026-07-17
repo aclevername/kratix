@@ -10,3 +10,8 @@ nodes:
     hostPort: 31340
   - containerPort: 31333
     hostPort: 31333
+  # for kube-prometheus-stack (quick-start.sh --metrics)
+  - containerPort: 31342
+    hostPort: 31342
+  - containerPort: 31343
+    hostPort: 31343

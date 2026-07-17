@@ -1,0 +1,31 @@
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: kafka
+metadata:
+  name: example-3
+  namespace: default
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: kafka
+metadata:
+  name: example-2
+  namespace: default
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: kafka
+metadata:
+  name: example-1
+  namespace: default
+spec:
+  size: small
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: kafka
+metadata:
+  name: example-0
+  namespace: default
+spec:
+  size: small

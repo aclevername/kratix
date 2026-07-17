@@ -1,0 +1,24 @@
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: three
+  namespace: default
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: one
+  namespace: default
+spec:
+  size: small
+---
+apiVersion: marketplace.kratix.io/v1alpha1
+kind: redis
+metadata:
+  name: two
+  namespace: default
+spec:
+  size: small

@@ -62,6 +62,7 @@ import (
 	platformv1alpha1 "github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/internal/controller"
 	"github.com/syntasso/kratix/internal/logging"
+	kratixmetrics "github.com/syntasso/kratix/internal/metrics"
 	"github.com/syntasso/kratix/internal/telemetry"
 	"github.com/syntasso/kratix/lib/fetchers"
 	//+kubebuilder:scaffold:imports
@@ -276,6 +277,10 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
+	}
+
+	if _, err := kratixmetrics.RegisterPlatformStateGauges(ctrl.Log.WithName("metrics"), mgr.GetClient()); err != nil {
+		setupLog.Error(err, "unable to register platform state gauges")
 	}
 
 	repositoryCache := controller.NewRepositoryCache()

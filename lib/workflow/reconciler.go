@@ -13,7 +13,9 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/syntasso/kratix/api/v1alpha1"
 	"github.com/syntasso/kratix/internal/logging"
+	"github.com/syntasso/kratix/internal/telemetry"
 	"github.com/syntasso/kratix/lib/resourceutil"
+	"go.opentelemetry.io/otel/attribute"
 	"gopkg.in/yaml.v2"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
@@ -137,9 +139,15 @@ func ReconcileDelete(opts Opts) (bool, error) {
 			return createDeletePipeline(opts, pipeline, false)
 		}
 		logging.Info(opts.logger, "delete pipeline completed")
+		telemetry.RecordWorkflowExecution(opts.ctx, telemetry.WorkflowResultSuccess,
+			succeededJobDuration(mostRecentJob), workflowJobAttributes(mostRecentJob)...)
 		return false, nil
 	}
 	if mostRecentJob.Status.Failed > 0 {
+		if !deleteWorkflowAlreadyMarkedAsFailed(opts.parentObject) {
+			telemetry.RecordWorkflowExecution(opts.ctx, telemetry.WorkflowResultFailure,
+				failedJobDuration(mostRecentJob), workflowJobAttributes(mostRecentJob)...)
+		}
 		return false, ErrDeletePipelineFailed
 	}
 
@@ -347,7 +355,64 @@ func reconcileWorkflowStatus(opts Opts, state *workflowState) (passiveRequeue bo
 		logging.Error(opts.logger, err, "failed to update parent object status")
 		return false, err
 	}
+
+	recordCompletedPipelineMetrics(opts, state, currentSucceededCount, currentFailedCount)
 	return true, nil
+}
+
+// recordCompletedPipelineMetrics records metrics for pipelines that transitioned to succeeded
+// or failed in this reconciliation. Recording only when the status counters move keeps
+// repeated reconciles of an already-completed job from being counted more than once.
+func recordCompletedPipelineMetrics(opts Opts, state *workflowState, previousSucceededCount, previousFailedCount int64) {
+	pipelineSucceeded := state.completedCount > 0 && state.completedCount > previousSucceededCount
+	if pipelineSucceeded && state.mostRecentJob != nil {
+		telemetry.RecordWorkflowExecution(opts.ctx, telemetry.WorkflowResultSuccess,
+			succeededJobDuration(state.mostRecentJob), workflowJobAttributes(state.mostRecentJob)...)
+	}
+
+	pipelineFailed := state.desiredFailedCount != nil && *state.desiredFailedCount > 0 && *state.desiredFailedCount > previousFailedCount
+	if pipelineFailed && state.desiredPipelineJob != nil {
+		telemetry.RecordWorkflowExecution(opts.ctx, telemetry.WorkflowResultFailure,
+			failedJobDuration(state.desiredPipelineJob), workflowJobAttributes(state.desiredPipelineJob)...)
+	}
+}
+
+func workflowJobAttributes(job *batchv1.Job) []attribute.KeyValue {
+	jobLabels := job.GetLabels()
+	return telemetry.WorkflowAttributes(
+		jobLabels[v1alpha1.WorkflowTypeLabel],
+		jobLabels[v1alpha1.WorkflowActionLabel],
+		jobLabels[v1alpha1.PromiseNameLabel],
+		jobLabels[v1alpha1.ResourceNameLabel],
+		jobLabels[v1alpha1.PipelineNameLabel],
+	)
+}
+
+func succeededJobDuration(job *batchv1.Job) time.Duration {
+	if job.Status.StartTime == nil || job.Status.CompletionTime == nil {
+		return 0
+	}
+	return job.Status.CompletionTime.Sub(job.Status.StartTime.Time)
+}
+
+func failedJobDuration(job *batchv1.Job) time.Duration {
+	if job.Status.StartTime == nil {
+		return 0
+	}
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobFailed && condition.Status == v1.ConditionTrue {
+			return condition.LastTransitionTime.Sub(job.Status.StartTime.Time)
+		}
+	}
+	return 0
+}
+
+// deleteWorkflowAlreadyMarkedAsFailed reports whether the parent object was already marked
+// with a failed delete workflow by a previous reconciliation, meaning the failure has
+// already been recorded in the metrics.
+func deleteWorkflowAlreadyMarkedAsFailed(parentObject *unstructured.Unstructured) bool {
+	condition := resourceutil.GetCondition(parentObject, resourceutil.DeleteWorkflowCompletedCondition)
+	return condition != nil && condition.Reason == resourceutil.DeleteWorkflowCompletedFailedReason
 }
 
 func executeReconcileAction(opts Opts, state *workflowState, pipeline v1alpha1.PipelineJobResources) (passiveRequeue bool, err error) {

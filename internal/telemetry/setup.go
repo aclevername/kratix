@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/syntasso/kratix/internal/logging"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otelprometheus "go.opentelemetry.io/otel/exporters/prometheus"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -19,11 +21,17 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 const (
 	otlpProtocolGRPC = "grpc"
 )
+
+// prometheusRegisterer is where the Prometheus exporter registers itself. It defaults
+// to the controller-runtime registry so Kratix metrics are served on the manager's
+// metrics endpoint alongside the controller-runtime metrics. Tests can swap it out.
+var prometheusRegisterer prometheus.Registerer = ctrlmetrics.Registry
 
 // Config captures OpenTelemetry exporter configuration loaded from the Kratix ConfigMap.
 type Config struct {
@@ -42,7 +50,8 @@ type SignalConfig struct {
 
 // SetupTracerProvider configures and installs global OpenTelemetry providers for traces and metrics.
 // If no OTLP endpoint is configured, telemetry is still generated locally so downstream resources can
-// participate in traces and metrics, but data will not be exported.
+// participate in traces and metrics, but trace data will not be exported. Metrics are always served in
+// Prometheus format on the manager's metrics endpoint unless explicitly disabled via the configuration.
 func SetupTracerProvider(ctx context.Context, logger logr.Logger, serviceName string, cfg *Config) (func(context.Context) error, error) {
 	tracesEnabled := isTracingEnabled(cfg)
 	metricsEnabled := isMetricsEnabled(cfg)
@@ -58,6 +67,10 @@ func SetupTracerProvider(ctx context.Context, logger logr.Logger, serviceName st
 			),
 		)
 		return func(context.Context) error { return nil }, nil
+	}
+
+	if cfg == nil {
+		cfg = &Config{}
 	}
 
 	var (
@@ -141,6 +154,10 @@ func SetupTracerProvider(ctx context.Context, logger logr.Logger, serviceName st
 		if metricExporter != nil {
 			meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)))
 		}
+		if promExporter := createPrometheusExporter(logger); promExporter != nil {
+			meterOpts = append(meterOpts, sdkmetric.WithReader(promExporter))
+			logging.Info(logger, "metrics will be served on the manager metrics endpoint in Prometheus format")
+		}
 
 		meterProvider := sdkmetric.NewMeterProvider(meterOpts...)
 		otel.SetMeterProvider(meterProvider)
@@ -149,7 +166,7 @@ func SetupTracerProvider(ctx context.Context, logger logr.Logger, serviceName st
 		if metricExporter != nil {
 			logging.Info(logger, "OpenTelemetry metrics enabled", "endpoint", endpoint)
 		} else {
-			logging.Info(logger, "OpenTelemetry metrics configured without exporter")
+			logging.Info(logger, "OpenTelemetry metrics configured without OTLP exporter")
 		}
 	} else {
 		otel.SetMeterProvider(metricnoop.NewMeterProvider())
@@ -234,8 +251,11 @@ func isTracingEnabled(cfg *Config) bool {
 }
 
 func isMetricsEnabled(cfg *Config) bool {
+	// Metrics stay enabled with no telemetry configuration: they are served in
+	// Prometheus format on the manager's metrics endpoint, which requires no OTLP
+	// endpoint. Only an explicit metrics.enabled=false turns them off.
 	if cfg == nil {
-		return false
+		return true
 	}
 	if cfg.Metrics != nil && cfg.Metrics.Enabled != nil {
 		return *cfg.Metrics.Enabled
@@ -258,6 +278,19 @@ func createTraceExporter(ctx context.Context, logger logr.Logger, endpoint strin
 	exporter, err := otlptracegrpc.New(ctx, opts...)
 	if err != nil {
 		logging.Error(logger, err, "creating OTLP trace exporter failed; falling back to local-only tracing")
+		return nil
+	}
+	return exporter
+}
+
+func createPrometheusExporter(logger logr.Logger) *otelprometheus.Exporter {
+	exporter, err := otelprometheus.New(
+		otelprometheus.WithRegisterer(prometheusRegisterer),
+		otelprometheus.WithoutScopeInfo(),
+		otelprometheus.WithoutTargetInfo(),
+	)
+	if err != nil {
+		logging.Error(logger, err, "creating Prometheus metric exporter failed; metrics will not be served on the metrics endpoint")
 		return nil
 	}
 	return exporter

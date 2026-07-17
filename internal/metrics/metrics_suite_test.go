@@ -1,4 +1,4 @@
-package telemetry_test
+package metrics_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestTelemetry(t *testing.T) {
+func TestMetrics(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Telemetry Suite")
+	RunSpecs(t, "Platform Metrics Suite")
 }

@@ -15,6 +15,13 @@ INSTALL_AND_CREATE_MINIO_BUCKET=true
 INSTALL_AND_CREATE_GITEA_REPO=false
 WORKER_STATESTORE_TYPE=BucketStateStore
 
+MONITORING_NAMESPACE="monitoring"
+KUBE_PROM_STACK_RELEASE="kube-prometheus-stack"
+# NodePorts exposed on the platform cluster (mapped to localhost in the kind config).
+# Keep these in sync with hack/platform/kind-platform-config.yaml.
+PROMETHEUS_NODE_PORT=31342
+GRAFANA_NODE_PORT=31343
+
 LOCAL_IMAGES_DIR=""
 VERSION=${VERSION:-"$(cd $ROOT; git branch --show-current)"}
 DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
@@ -287,6 +294,83 @@ wait_for_kratix_deployment() {
     kubectl wait deployment --context kind-${PLATFORM_CLUSTER_NAME} -n kratix-platform-system kratix-platform-controller-manager --for=condition=Available --timeout=300s
 }
 
+# install_metrics_stack installs kube-prometheus-stack on the platform cluster and
+# tells Prometheus how to scrape Kratix.
+#
+# kube-prometheus-stack is a Helm chart that bundles the four pieces you need to get
+# started with metrics: Prometheus (stores the metrics), the Prometheus Operator
+# (turns ServiceMonitor resources into scrape config), Grafana (dashboards) and
+# Alertmanager (alerting).
+install_metrics_stack() {
+    local context="kind-${PLATFORM_CLUSTER_NAME}"
+
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo update prometheus-community
+
+    # serviceMonitorSelectorNilUsesHelmValues=false lets Prometheus discover every
+    # ServiceMonitor in the cluster, instead of only the ones created by this Helm
+    # release. This keeps the Kratix ServiceMonitor below nice and simple.
+    #
+    # The Prometheus and Grafana Services are exposed as NodePorts so you can reach
+    # them on localhost (the ports are mapped to the host in the kind config).
+    helm upgrade --install ${KUBE_PROM_STACK_RELEASE} prometheus-community/kube-prometheus-stack \
+        --kube-context ${context} \
+        --namespace ${MONITORING_NAMESPACE} \
+        --create-namespace \
+        --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+        --set prometheus.service.type=NodePort \
+        --set prometheus.service.nodePort=${PROMETHEUS_NODE_PORT} \
+        --set grafana.service.type=NodePort \
+        --set grafana.service.nodePort=${GRAFANA_NODE_PORT} \
+        --wait
+
+    # Kratix serves its metrics over an authenticated HTTPS endpoint, so Prometheus
+    # must be allowed to read them. Kratix ships the 'kratix-platform-metrics-reader'
+    # ClusterRole granting GET on /metrics; here we bind it to the Prometheus
+    # ServiceAccount that the Helm chart created.
+    kubectl --context ${context} apply --filename - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kratix-metrics-reader-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kratix-platform-metrics-reader
+subjects:
+- kind: ServiceAccount
+  name: ${KUBE_PROM_STACK_RELEASE}-prometheus
+  namespace: ${MONITORING_NAMESPACE}
+EOF
+
+    # The ServiceMonitor tells Prometheus which Service to scrape and how. It targets
+    # the Kratix controller-manager metrics Service (port 'https', 8443). Because the
+    # endpoint is token-authenticated and uses a self-signed cert inside kind, we give
+    # Prometheus its ServiceAccount token and skip TLS verification.
+    kubectl --context ${context} apply --filename - <<EOF
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kratix-controller-manager
+  namespace: kratix-platform-system
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  endpoints:
+  - path: /metrics
+    port: https
+    scheme: https
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tlsConfig:
+      insecureSkipVerify: true
+EOF
+
+    # Load the Kratix Grafana dashboards. The Grafana sidecar auto-imports any
+    # ConfigMap labelled grafana_dashboard=1, so they appear without any clicking.
+    CONTEXT=${context} MONITORING_NAMESPACE=${MONITORING_NAMESPACE} "${ROOT}/scripts/install-dashboards.sh"
+}
+
 wait_for_gitea() {
     wait_opts=$1
     kubectl wait pod --context kind-${PLATFORM_CLUSTER_NAME} -n gitea --selector app=gitea --for=condition=ready ${wait_opts}
@@ -549,6 +633,13 @@ install_kratix() {
         success_mark
     fi
 
+    log -n "Installing kube-prometheus-stack and wiring up Kratix metrics..."
+    if ! SUPPRESS_OUTPUT=true run install_metrics_stack; then
+        error "Failed to install the metrics stack"
+        exit 1
+    fi
+    success_mark
+
     kubectl config use-context kind-${PLATFORM_CLUSTER_NAME} >/dev/null
 
     if ${INSTALL_AND_CREATE_MINIO_BUCKET}; then
@@ -571,6 +662,20 @@ install_kratix() {
             echo "export WORKER=kind-${WORKER1_CLUSTER_NAME}"
         fi
     fi
+
+    local grafana_user grafana_password
+    grafana_user=$(kubectl --context kind-${PLATFORM_CLUSTER_NAME} -n ${MONITORING_NAMESPACE} get secret ${KUBE_PROM_STACK_RELEASE}-grafana -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 --decode)
+    grafana_password=$(kubectl --context kind-${PLATFORM_CLUSTER_NAME} -n ${MONITORING_NAMESPACE} get secret ${KUBE_PROM_STACK_RELEASE}-grafana -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 --decode)
+
+    echo ""
+    echo "Prometheus and Grafana are installed in the '${MONITORING_NAMESPACE}' namespace."
+    echo ""
+    echo "Explore Kratix metrics in Prometheus (search for metrics starting with 'kratix_'):"
+    echo "  http://localhost:${PROMETHEUS_NODE_PORT}"
+    echo ""
+    echo "Open Grafana (login: ${grafana_user:-admin} / ${grafana_password:-<see secret ${KUBE_PROM_STACK_RELEASE}-grafana>}):"
+    echo "  http://localhost:${GRAFANA_NODE_PORT}"
+    echo "  Dashboards: 'Kratix — Platform Health' and 'Kratix — Promise Detail' (tag: kratix)"
 
 }
 
